@@ -75,6 +75,7 @@ private:
     // SVG loading
     std::string mSvgPath;
     uint32_t mTriangulationType = 0; // 0=EarClipping, 1=MWT, 2=CentroidFan, 3=Greedy, 4=Strip, 5=MaxMin, 6=MinMax, 7=CDT
+    float mMaxBezierDeviation = 20.0f;
 
     // Grid instancing
     uint32_t mGridCols = 10;

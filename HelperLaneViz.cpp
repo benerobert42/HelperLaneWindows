@@ -126,7 +126,7 @@ void HelperLaneViz::loadSvg(const std::string& path)
         }
     };
 
-    if (SVGLoader::TessellateSvgToMesh(path, mVertices, mIndices, triangulator))
+    if (SVGLoader::TessellateSvgToMesh(path, mVertices, mIndices, triangulator, mMaxBezierDeviation))
     {
         uploadGeometry();
     }
@@ -280,11 +280,12 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     }
     else
     {
+        bool bezierChanged = w.var("Max Bezier Deviation", mMaxBezierDeviation, 0.1f, 100.0f);
         if (w.textbox("SVG Path", mSvgPath) || modeChanged)
         {
             loadSvg(mSvgPath);
         }
-        if (triangChanged)
+        if (triangChanged || bezierChanged)
         {
             loadSvg(mSvgPath);
         }
