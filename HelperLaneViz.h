@@ -59,8 +59,10 @@ private:
     ref<Buffer> mpIB;
     uint32_t mIndexCount = 0;
     ref<VertexLayout> mpLayout;
-    ref<FullScreenPass> mpPass;
-    ref<Texture> mpHelperLaneCounter;
+    ref<FullScreenPass> mpVisualizationPass;
+    ref<Texture> mpPartialQuadCounter;
+    ref<Texture> mpPartialNonHelperLaneCounter;
+    bool mAverageQuad = false;
 
     // === NEW: current polygon (editable)
     std::vector<Vertex> mVertices;

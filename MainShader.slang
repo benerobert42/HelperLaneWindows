@@ -1,4 +1,4 @@
-// Poly.slang
+// MainShader.slang
 struct VSIn
 {
     float2 pos : POSITION;    // expected in [0..1] UV space
@@ -18,9 +18,11 @@ struct GridParams
     float scale;
 };
 
-GridParams grid;
-RWTexture2D<uint> gHelperLaneCounter;
+uniform GridParams grid;
+RWTexture2D<uint> PartialQuadCounterUAV;
+RWTexture2D<uint> PartialNonHelperLaneCounterUAV;
 
+// === Pass 1: Counting pass ===
 V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 {
     uint col = instanceId % grid.cols;
@@ -38,31 +40,57 @@ float4 psMain(V2P input) : SV_Target
 {
     uint2 pixelPos = (uint2)input.pos.xy;
     
-    // Count helper lanes in the current quad using quad operations
-    uint isHelperLane = IsHelperLane() ? 1u : 0u;
-    uint quadHelperCount = 
-        QuadReadLaneAt(isHelperLane, 0) +
-        QuadReadLaneAt(isHelperLane, 1) +
-        QuadReadLaneAt(isHelperLane, 2) +
-        QuadReadLaneAt(isHelperLane, 3);
+    uint ActiveLaneCount = WaveActiveCountBits(true); // !!! needs to be outside all branching
+    uint WaveLaneCount = WaveGetLaneCount();
+    uint HelperLaneCount = WaveLaneCount - ActiveLaneCount;
     
-    // Determine if we're the top-left pixel of the quad (lane 0)
-    // In a quad, lane 0 is the pixel with even x and even y coordinates
-    bool isLane0 = ((pixelPos.x & 1) == 0) && ((pixelPos.y & 1) == 0);
-    
-    // Only the top-left pixel (lane 0) increments the counter to avoid race conditions
-    if (isLane0 && quadHelperCount > 0)
+    if (HelperLaneCount > 0) // if there is any inactive lane (= helper-lane)
     {
-        InterlockedAdd(gHelperLaneCounter[pixelPos], quadHelperCount);
+        if (WaveIsFirstLane())
+        {
+            InterlockedAdd(PartialQuadCounterUAV[pixelPos], 1); // count wave as partial in the first lane's coord
+        }
+        InterlockedAdd(PartialNonHelperLaneCounterUAV[pixelPos], 1); // count each active fragment
     }
     
-    // Read the total accumulated count
-    // This includes counts from all quads/instances that rendered to this pixel
-    uint totalCount = gHelperLaneCounter[pixelPos];
+    // Output transparent - visualization happens in second pass
+    return float4(0, 0, 0, 0);
+}
+
+// === Pass 2: Visualization pass ===
+uniform bool averageQuad;
+
+Texture2D<uint> PartialQuadCounter;
+Texture2D<uint> PartialNonHelperLaneCounter;
+
+float4 vsVisualization(uint vId : SV_VertexID) : SV_POSITION
+{
+    if (vId == 0)      return float4(-1, -1, 0, 1);
+    else if (vId == 1) return float4( 3, -1, 0, 1);
+    else               return float4(-1,  3, 0, 1);
+}
+
+float4 psVisualization(float4 posH : SV_POSITION) : SV_TARGET
+{
+    uint2 pixelPos = (uint2)posH.xy;
     
-    // Visualize based on total count
-    if (totalCount == 0)      return float4(0, 1, 0, 1);  // green
-    else if (totalCount == 1) return float4(1, 1, 0, 1);  // yellow
-    else if (totalCount == 2) return float4(1, 0.5, 0.1, 1); // orange
-    else                      return float4(1, 0, 0, 1);  // red
+    // how many times was this quad partially rendered (high cap for helper-lane count)
+    uint Wave_PartialQuadCount = WaveActiveSum(PartialQuadCounter[pixelPos]);
+    // how many times was this fragment still active in a partially rendered quad
+    uint Fragment_PartialNonHelperLaneCount = PartialNonHelperLaneCounter[pixelPos];
+    uint Fragment_HelperLaneCount = Wave_PartialQuadCount - Fragment_PartialNonHelperLaneCount;
+    
+    if (averageQuad)
+    {
+        // sum the helper lanes written in the wave area
+        uint Wave_HelperLaneCount = WaveActiveSum(Fragment_HelperLaneCount);
+        // average the sum for the area
+        uint ActiveWaveCount = WaveActiveCountBits(true);
+        Fragment_HelperLaneCount = (Wave_HelperLaneCount + ActiveWaveCount - 1) / ActiveWaveCount;
+    }
+    
+    if (Fragment_HelperLaneCount == 0)      return float4(0, 1, 0, 1); // green
+    else if (Fragment_HelperLaneCount == 1) return float4(1, 1, 0, 1); // yellow
+    else if (Fragment_HelperLaneCount == 3) return float4(0, 0, 1, 1); // blue
+    else                                    return float4(1, 0, 0, 1); // red
 }

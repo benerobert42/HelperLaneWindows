@@ -55,10 +55,9 @@ HelperLaneViz::~HelperLaneViz() {}
 
 void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 {
+    // Geometry pass (counting pass)
     ProgramDesc d;
     d.addShaderLibrary("Samples/HelperLaneViz/MainShader.slang").vsEntry("vsMain").psEntry("psMain");
-
-    mpPass = FullScreenPass::create(getDevice(), d);
 
     mpProgram = Program::create(getDevice(), d);
     mpVars = ProgramVars::create(getDevice(), mpProgram.get());
@@ -75,6 +74,11 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     pVbLayout->addElement("POSITION", 0, ResourceFormat::RG32Float, 1, 0);
     mpLayout->addBufferLayout(0, pVbLayout);
 
+    // Visualization fullscreen pass
+    ProgramDesc visDesc;
+    visDesc.addShaderLibrary("Samples/HelperLaneViz/MainShader.slang").vsEntry("vsVisualization").psEntry("psVisualization");
+    mpVisualizationPass = FullScreenPass::create(getDevice(), visDesc);
+
     // Load SVG file (default path, can be changed via GUI)
     mSvgPath = "C:/Users/ShaprIntel/Downloads/1920560.svg";
     loadSvg(mSvgPath);
@@ -84,16 +88,18 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 
     updateGridParams();
 
-    mpHelperLaneCounter = getDevice()->createTexture2D(
-        getTargetFbo()->getWidth(),
-        getTargetFbo()->getHeight(),
-        ResourceFormat::R32Uint,
-        1,
-        1,
-        nullptr,
-        ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+    uint32_t w = getTargetFbo()->getWidth();
+    uint32_t h = getTargetFbo()->getHeight();
+
+    mpPartialQuadCounter = getDevice()->createTexture2D(
+        w, h, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
-    mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
+    mpPartialNonHelperLaneCounter = getDevice()->createTexture2D(
+        w, h, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+    );
+
+    mpVars->getRootVar()["PartialQuadCounterUAV"].setUav(mpPartialQuadCounter->getUAV());
+    mpVars->getRootVar()["PartialNonHelperLaneCounterUAV"].setUav(mpPartialNonHelperLaneCounter->getUAV());
 }
 
 void HelperLaneViz::loadSvg(const std::string& path)
@@ -218,27 +224,41 @@ void HelperLaneViz::onShutdown() {}
 void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 {
     updateGridParams();
-    mpHelperLaneCounter = getDevice()->createTexture2D(
+
+    mpPartialQuadCounter = getDevice()->createTexture2D(
         width, height, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
-    mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
+    mpPartialNonHelperLaneCounter = getDevice()->createTexture2D(
+        width, height, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+    );
+
+    mpVars->getRootVar()["PartialQuadCounterUAV"].setUav(mpPartialQuadCounter->getUAV());
+    mpVars->getRootVar()["PartialNonHelperLaneCounterUAV"].setUav(mpPartialNonHelperLaneCounter->getUAV());
 }
 
 void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
-    mpState->setFbo(pTargetFbo);
     pRenderContext->clearFbo(pTargetFbo.get(), float4(0.f), 1.f, 0);
 
-    if (mpHelperLaneCounter)
-    {
-        pRenderContext->clearUAV(mpHelperLaneCounter->getUAV().get(), uint4(0));
-    }
+    // Clear UAV counters
+    if (mpPartialQuadCounter)
+        pRenderContext->clearUAV(mpPartialQuadCounter->getUAV().get(), uint4(0));
+    if (mpPartialNonHelperLaneCounter)
+        pRenderContext->clearUAV(mpPartialNonHelperLaneCounter->getUAV().get(), uint4(0));
 
+    // Pass 1: Geometry rendering - count helper lanes
+    mpState->setFbo(pTargetFbo);
     if (mIndexCount)
     {
         uint32_t instanceCount = mGridCols * mGridRows;
         pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
     }
+
+    // Pass 2: Visualization - read counter and render colors
+    mpVisualizationPass->getRootVar()["averageQuad"] = mAverageQuad;
+    mpVisualizationPass->getRootVar()["PartialQuadCounter"].setTexture(mpPartialQuadCounter);
+    mpVisualizationPass->getRootVar()["PartialNonHelperLaneCounter"].setTexture(mpPartialNonHelperLaneCounter);
+    mpVisualizationPass->execute(pRenderContext, pTargetFbo);
 }
 
 void HelperLaneViz::onGuiRender(Gui* pGui)
@@ -298,6 +318,9 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     {
         updateGridParams();
     }
+
+    w.separator();
+    w.checkbox("Average Per Quad", mAverageQuad);
 }
 
 bool HelperLaneViz::onKeyEvent(const KeyboardEvent& keyEvent)
