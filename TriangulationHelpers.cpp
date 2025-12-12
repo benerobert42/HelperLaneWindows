@@ -35,7 +35,7 @@ inline double triangleArea(const std::vector<Vertex>& vertices, uint32_t indexA,
     const float2 ab = vertices[indexB].pos - vertices[indexA].pos;
     const float2 ac = vertices[indexC].pos - vertices[indexA].pos;
 
-    // 2D cross product (z-component)
+    // Cross product's z-component
     return std::abs(static_cast<double>(ab.x * ac.y - ab.y * ac.x)) * 0.5;
 }
 
@@ -62,24 +62,22 @@ inline bool isCounterClockwise(const std::vector<Vertex>& vertices, uint32_t ind
     const auto& posB = vertices[indexB].pos;
     const auto& posC = vertices[indexC].pos;
 
-    const double crossProduct = (static_cast<double>(posB.x) - posA.x) * (static_cast<double>(posC.y) - posA.y) -
-                                (static_cast<double>(posB.y) - posA.y) * (static_cast<double>(posC.x) - posA.x);
+    const float crossProduct = (posB.x - posA.x) * (posC.y - posA.y) - (posB.y - posA.y) * (posC.x - posA.x);
     return crossProduct > 0.0;
 }
 
 // Signed cross product of vectors (p1-p0) and (p2-p0)
-inline double cross2D(const float2& p0, const float2& p1, const float2& p2)
+inline float cross2D(const float2& p0, const float2& p1, const float2& p2)
 {
-    return (static_cast<double>(p1.x) - p0.x) * (static_cast<double>(p2.y) - p0.y) -
-           (static_cast<double>(p1.y) - p0.y) * (static_cast<double>(p2.x) - p0.x);
+    return (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
 }
 
 // Check if point P is strictly inside triangle ABC (not on edges)
 inline bool pointInTriangle(const float2& p, const float2& a, const float2& b, const float2& c)
 {
-    const double d1 = cross2D(p, a, b);
-    const double d2 = cross2D(p, b, c);
-    const double d3 = cross2D(p, c, a);
+    const float d1 = cross2D(p, a, b);
+    const float d2 = cross2D(p, b, c);
+    const float d3 = cross2D(p, c, a);
 
     const bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
     const bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
@@ -115,10 +113,10 @@ inline bool pointInsidePolygon(const float2& p, const std::vector<Vertex>& verti
 // Check if two line segments intersect (excluding endpoints)
 inline bool segmentsIntersect(const float2& p1, const float2& p2, const float2& q1, const float2& q2)
 {
-    const double d1 = cross2D(p1, p2, q1);
-    const double d2 = cross2D(p1, p2, q2);
-    const double d3 = cross2D(q1, q2, p1);
-    const double d4 = cross2D(q1, q2, p2);
+    const float d1 = cross2D(p1, p2, q1);
+    const float d2 = cross2D(p1, p2, q2);
+    const float d3 = cross2D(q1, q2, p1);
+    const float d4 = cross2D(q1, q2, p2);
 
     // Segments intersect if points are on opposite sides
     if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
