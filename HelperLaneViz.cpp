@@ -31,6 +31,7 @@
 #include "SVGLoader.h"
 
 #include "Falcor.h"
+#include "Core/Program/ProgramManager.h"
 
 using namespace Falcor;
 
@@ -57,6 +58,8 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 {
     ProgramDesc d;
     d.addShaderLibrary("Samples/HelperLaneWindows/Shaders/MainShader.slang").vsEntry("vsMain").psEntry("psMain");
+
+    pRenderContext->getDevice()->getProgramManager()->setGenerateDebugInfoEnabled(true);
 
     mpPass = FullScreenPass::create(getDevice(), d);
 
