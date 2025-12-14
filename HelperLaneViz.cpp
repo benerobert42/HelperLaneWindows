@@ -56,7 +56,7 @@ HelperLaneViz::~HelperLaneViz() {}
 void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 {
     ProgramDesc d;
-    d.addShaderLibrary("Samples/HelperLaneViz/MainShader.slang").vsEntry("vsMain").psEntry("psMain");
+    d.addShaderLibrary("Samples/HelperLaneWindows/Shaders/MainShader.slang").vsEntry("vsMain").psEntry("psMain");
 
     mpPass = FullScreenPass::create(getDevice(), d);
 
