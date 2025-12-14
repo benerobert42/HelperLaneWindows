@@ -75,14 +75,14 @@ private:
     // SVG loading
     std::string mSvgPath;
     uint32_t mTriangulationType = 0; // 0=EarClipping, 1=MWT, 2=CentroidFan, 3=Greedy, 4=Strip, 5=MaxMin, 6=MinMax, 7=CDT
-    float mMaxBezierDeviation = 20.0f;
+    float mMaxBezierDeviation = 1.0f;
 
     // Grid instancing
-    uint32_t mGridCols = 10;
-    uint32_t mGridRows = 10;
-    float2 mGridCellSize = float2(0.1f, 0.1f);
+    uint32_t mGridCols = 1;
+    uint32_t mGridRows = 1;
+    float2 mGridCellSize = float2(1.0f, 1.0f);
     float2 mGridOrigin = float2(0.0f, 0.0f);
-    float mGridScale = 0.1f;
+    float mGridScale = 1.0f;
 
     void uploadGeometry();
     void loadSvg(const std::string& path);
