@@ -77,6 +77,10 @@ private:
     uint32_t mTriangulationType = 0; // 0=EarClipping, 1=MWT, 2=CentroidFan, 3=Greedy, 4=Strip, 5=MaxMin, 6=MinMax, 7=CDT
     float mMaxBezierDeviation = 1.0f;
 
+    // Helper lane count
+    uint32_t mHelperLaneCount{};
+    bool mReadBackHelperLaneCount = false;
+
     // Grid instancing
     uint32_t mGridCols = 1;
     uint32_t mGridRows = 1;

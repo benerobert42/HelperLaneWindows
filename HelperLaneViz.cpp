@@ -243,6 +243,12 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
         uint32_t instanceCount = mGridCols * mGridRows;
         pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
     }
+
+    if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount)
+    {
+        std::vector<uint8_t> counterData = pRenderContext->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
+        mHelperLaneCount = *(uint32_t*)counterData.data();
+    }
 }
 
 void HelperLaneViz::onGuiRender(Gui* pGui)
@@ -270,6 +276,22 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     Gui::DropdownList triangTypes = {
         {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"}, {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
+
+    w.separator();
+
+    w.checkbox("Read back helper lane count", mReadBackHelperLaneCount);
+
+    if (mReadBackHelperLaneCount)
+    {
+        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
+        std::string helperLaneCountStr = "Helper lane count: " + std::to_string(mHelperLaneCount);
+        w.text(helperLaneCountStr);
+    }
+    else
+    {
+        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
+    }
+    w.separator();
 
     if (mUseCircle)
     {

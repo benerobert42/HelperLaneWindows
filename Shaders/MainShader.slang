@@ -1,4 +1,9 @@
 // Poly.slang
+
+#ifndef READ_BACK_HELPER_LANE_COUNT
+#define READ_BACK_HELPER_LANE_COUNT 0
+#endif
+
 struct VSIn
 {
     float2 pos : POSITION;    // expected in [0..1] UV space
@@ -47,5 +52,8 @@ float4 psMain(V2P input) : SV_Target
         float4(1.0, 0.5, 0.1, 1.0),   // 2
         float4(1.0, 0.0, 0.0, 1.0)    // 3
     };
+#if READ_BACK_HELPER_LANE_COUNT
+    InterlockedAdd(gHelperLaneCounter[0], sum);
+#endif
     return kColors[clamp(sum, 0u, 3u)];
 }
