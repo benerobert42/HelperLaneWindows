@@ -9,7 +9,7 @@ struct V2P
     float4 pos : SV_Position;
 };
 
-struct GridParams
+cbuffer Grid
 {
     uint cols;
     uint rows;
@@ -18,15 +18,14 @@ struct GridParams
     float scale;
 };
 
-GridParams grid;
 RWTexture2D<uint> gHelperLaneCounter;
 
 V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 {
-    uint col = instanceId % grid.cols;
-    uint row = instanceId / grid.cols;
-    float2 cellOrigin = float2(col, row) * grid.cellSize + grid.origin;
-    float2 local = v.pos * grid.scale;
+    uint col = instanceId % cols;
+    uint row = instanceId / cols;
+    float2 cellOrigin = float2(col, row) * cellSize + origin;
+    float2 local = v.pos * scale;
     float2 worldPos = cellOrigin + local;
     float2 ndc = worldPos * 2.0 - 1.0;
     V2P o;

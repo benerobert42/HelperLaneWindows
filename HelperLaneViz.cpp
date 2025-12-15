@@ -214,7 +214,7 @@ void HelperLaneViz::updateGridParams()
     gridParams.cellSize = mGridCellSize;
     gridParams.origin = mGridOrigin;
     gridParams.scale = mGridScale;
-    mpVars->getRootVar()["grid"].setBlob(gridParams);
+    mpVars->getRootVar()["Grid"].setBlob(gridParams);
 }
 
 void HelperLaneViz::onShutdown() {}
