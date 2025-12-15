@@ -53,7 +53,14 @@ float4 psMain(V2P input) : SV_Target
         float4(1.0, 0.0, 0.0, 1.0)    // 3
     };
 #if READ_BACK_HELPER_LANE_COUNT
-    InterlockedAdd(gHelperLaneCounter[0], sum);
+    uint quadLane = WaveGetLaneIndex() % 4; // ID within 2x2 quad - https://microsoft.github.io/DirectX-Specs/d3d/HLSL_SM_6_7_QuadAny_QuadAll.html
+    uint candidate = IsHelperLane() ? 4u : quadLane;
+    uint m = candidate;
+         m = min(m, QuadReadAcrossX(candidate));
+         m = min(m, QuadReadAcrossY(candidate));
+         m = min(m, QuadReadAcrossDiagonal(candidate));
+
+    if (m < 4u && candidate == m) InterlockedAdd(gHelperLaneCounter[0], sum);
 #endif
     return kColors[clamp(sum, 0u, 3u)];
 }
