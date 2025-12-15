@@ -230,7 +230,8 @@ void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
     mpState->setFbo(pTargetFbo);
-    pRenderContext->clearFbo(pTargetFbo.get(), float4(0.f), 1.f, 0);
+    const float4 bgColor(0.0f);
+    pRenderContext->clearFbo(pTargetFbo.get(), bgColor, 1.f, 0);
 
     if (mpHelperLaneCounter)
     {

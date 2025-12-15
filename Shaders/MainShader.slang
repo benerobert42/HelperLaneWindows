@@ -42,10 +42,10 @@ float4 psMain(V2P input) : SV_Target
         QuadReadLaneAt(isHelperLane, 2) +
         QuadReadLaneAt(isHelperLane, 3);
     static const float4 kColors[4] = {
-        float4(0.0, 1.0, 0.0, 1.0),  // 0 helpers
-        float4(1.0, 1.0, 0.0, 1.0),  // 1
-        float4(1.0, 0.5, 0.1, 1.0),  // 2
-        float4(1.0, 0.0, 0.0, 1.0)   // 3
+        float4(0.0, 0.2, 0.0, 1.0),   // 0 helpers
+        float4(1.0, 1.0, 0.0, 1.0),   // 1
+        float4(1.0, 0.5, 0.1, 1.0),   // 2
+        float4(1.0, 0.0, 0.0, 1.0)    // 3
     };
     return kColors[clamp(sum, 0u, 3u)];
 }
