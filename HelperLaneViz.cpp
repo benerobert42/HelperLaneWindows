@@ -54,6 +54,26 @@ uint32_t mSampleGuiPositionY = 40;
 HelperLaneViz::HelperLaneViz(const SampleAppConfig& config) : SampleApp(config) {}
 HelperLaneViz::~HelperLaneViz() {}
 
+void HelperLaneViz::CreateMSAATargets()
+{
+    mpFbo = Fbo::create(getDevice());
+    ref<Texture> tex = getDevice()->createTexture2DMS(
+        getTargetFbo()->getWidth(), getTargetFbo()->getHeight(),
+        ResourceFormat::RGBA16Float,
+        cntMSAA,
+        1,
+        ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget
+    );
+    mpFbo->attachColorTarget(tex, 0);
+
+    mpResolvedTexture = getDevice()->createTexture2D(
+        getTargetFbo()->getWidth(),
+        getTargetFbo()->getHeight(),
+        ResourceFormat::RGBA16Float,
+        1,
+        1);
+}
+
 void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 {
     ProgramDesc d;
@@ -88,8 +108,8 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     updateGridParams();
 
     mpHelperLaneCounter = getDevice()->createTexture2D(
-        getTargetFbo()->getWidth(),
-        getTargetFbo()->getHeight(),
+        1,
+        1,
         ResourceFormat::R32Uint,
         1,
         1,
@@ -97,6 +117,9 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
         ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
     mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
+
+    // MSAA render target
+    CreateMSAATargets();
 }
 
 void HelperLaneViz::loadSvg(const std::string& path)
@@ -222,16 +245,26 @@ void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 {
     updateGridParams();
     mpHelperLaneCounter = getDevice()->createTexture2D(
-        width, height, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        1, 1, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
     mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
+    CreateMSAATargets();
 }
 
 void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
-    mpState->setFbo(pTargetFbo);
+    mpState->setFbo(mpFbo);
     const float4 bgColor(0.0f);
-    pRenderContext->clearFbo(pTargetFbo.get(), bgColor, 1.f, 0);
+    if (cntMSAA > 1)
+    {
+        pRenderContext->clearFbo(mpFbo.get(), bgColor, 1.f, 0);
+        mpState->setFbo(mpFbo);
+    }
+    else
+    {
+        pRenderContext->clearFbo(pTargetFbo.get(), bgColor, 1.f, 0);
+        mpState->setFbo(pTargetFbo);
+    }
 
     if (mpHelperLaneCounter)
     {
@@ -248,6 +281,12 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
     {
         std::vector<uint8_t> counterData = pRenderContext->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
         mHelperLaneCount = *(uint32_t*)counterData.data();
+    }
+
+    if (cntMSAA > 1)
+    {
+        pRenderContext->resolveResource(mpFbo->getColorTexture(0), mpResolvedTexture);
+        pRenderContext->blit(mpResolvedTexture->getSRV(), pTargetFbo->getRenderTargetView(0));
     }
 }
 
@@ -271,8 +310,15 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         }
     }
 
+    // MSAA
+    Gui::DropdownList msaaTypes = { {1, "None"}, { 2, "2x" }, {4, "4x"}, {8, "8x"}, {16, "16x"} };
+    bool msaaChanged = w.dropdown("MSAA", msaaTypes, cntMSAA);
+    if (msaaChanged && cntMSAA > 1u) CreateMSAATargets();
+
+    // Use built-in circle
     bool modeChanged = w.checkbox("Use Circle", mUseCircle);
 
+    // Triangulation type
     Gui::DropdownList triangTypes = {
         {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"}, {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);

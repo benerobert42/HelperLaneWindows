@@ -62,6 +62,12 @@ private:
     ref<FullScreenPass> mpPass;
     ref<Texture> mpHelperLaneCounter;
 
+    // MSAA setup
+    void CreateMSAATargets();
+    ref<Fbo> mpFbo;
+    ref<Texture> mpResolvedTexture;
+    uint32_t cntMSAA = 4;
+
     // === NEW: current polygon (editable)
     std::vector<Vertex> mVertices;
     std::vector<uint32_t> mIndices;
