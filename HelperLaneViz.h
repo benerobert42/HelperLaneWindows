@@ -129,4 +129,6 @@ private:
     void loadSvg(const std::string& path);
     void generateCircle();
     void updateGridParams();
+
+    void processBenchmarkStep(RenderContext* pRenderContext);
 };

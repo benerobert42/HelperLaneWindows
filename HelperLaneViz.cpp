@@ -290,6 +290,134 @@ void HelperLaneViz::updateGridParams()
     mpVars->getRootVar()["Grid"].setBlob(gridParams);
 }
 
+void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
+{
+    const std::unordered_map<int, std::string> kTriangulationMethodNames = {
+        {0, "Ear Clipping"},
+        {1, "MWT"},
+        {2, "Centroid Fan"},
+        {3, "Greedy"},
+        {4, "Strip"},
+        {5, "MaxMin"},
+        {6, "MinMax"},
+        {7, "CDT"},
+        {8, "Earcut (Mapbox)"},
+        {9, "Earcut + Flip"},
+        {10, "CDT + Flip"}
+    };
+    Profiler* pProfiler = getDevice()->getProfiler();
+    if (pProfiler)
+        pProfiler->setEnabled(true);
+
+    int method = mBenchmarkMethods[mCurrentMethod];
+    std::string methodName = kTriangulationMethodNames.at(method);
+
+    switch (mBenchmarkStep)
+    {
+    case 0: // CPU triangulation
+    {
+        mTriangulationType = method;
+        auto start = std::chrono::high_resolution_clock::now();
+        if (mUseCircle)
+            generateCircle();
+        else
+            loadSvg(mSvgPath);
+        auto end = std::chrono::high_resolution_clock::now();
+        mCpuTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
+
+        mWaitFrameCounter = 0;
+        mBenchmarkStep = 1;
+        break;
+    }
+    case 1: // Wait frames for stability
+    {
+        const int waitFrames = 50;
+        mWaitFrameCounter++;
+        if (mWaitFrameCounter >= waitFrames)
+        {
+            mGpuFrameCounter = 0;
+            mGpuTimes.clear();
+            mBenchmarkStep = 2;
+        }
+        break;
+    }
+    case 2: // Measure GPU frames
+    {
+        const int gpuFrames = 100;
+
+        if (pProfiler && pProfiler->isEnabled())
+        {
+            const auto& events = pProfiler->getEvents();
+            for (auto* pEvent : events)
+            {
+                if (pEvent->getName() == "/onFrameRender")
+                {
+                    float gpuTime = pEvent->getGpuTime(); // in ms
+                    mGpuTimes.push_back(gpuTime);
+                    break;
+                }
+            }
+        }
+
+        mGpuFrameCounter++;
+        if (mGpuFrameCounter == gpuFrames )
+        {
+            mReadBackHelperLaneCount = true;
+            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
+        }
+        if (mGpuFrameCounter > gpuFrames)
+        {
+            // Compute stats
+            std::sort(mGpuTimes.begin(), mGpuTimes.end());
+            float median = mGpuTimes[mGpuTimes.size() / 2];
+            float mean = std::accumulate(mGpuTimes.begin(), mGpuTimes.end(), 0.0f) / mGpuTimes.size();
+            float sqSum = 0.0f;
+            for (float t : mGpuTimes)
+                sqSum += (t - mean) * (t - mean);
+            float stddev = std::sqrt(sqSum / mGpuTimes.size());
+
+            // Read helper lane counter
+            uint32_t helperCount = mHelperLaneCount;
+            mReadBackHelperLaneCount = false;
+            mpProgram->removeDefine("READ_BACK_HELPER_LANE_COUNT");
+
+            // Format CSV line with method name
+            std::ostringstream oss;
+            oss << methodName << "," // Method name
+                << mCpuTimeMs << "," // CPU Time
+                << median << ","     // GPU Median
+                << mean << ","       // GPU Mean
+                << stddev << ","     // GPU StdDev
+                << helperCount;      // Helper Lane Count
+            std::string logLine = oss.str();
+
+            // ImGui log
+            mBenchmarkLog.push_back(logLine);
+
+            // Write to file
+            if (mBenchmarkFile.is_open())
+                mBenchmarkFile << logLine << "\n";
+
+            // Move to next method
+            mCurrentMethod++;
+            if (mCurrentMethod >= (int)mBenchmarkMethods.size())
+            {
+                mBenchmarkActive = false;
+                mBenchmarkStep = 0;
+                if (mBenchmarkFile.is_open())
+                    mBenchmarkFile.close();
+                mBenchmarkLog.push_back("Benchmark complete!");
+            }
+            else
+            {
+                mBenchmarkStep = 0; // Next method
+            }
+        }
+        break;
+    }
+    }
+}
+
 void HelperLaneViz::onShutdown() {}
 void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 {
@@ -305,115 +433,7 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 {
     if (mBenchmarkActive)
     {
-        Profiler* pProfiler = getDevice()->getProfiler();
-        if (pProfiler)
-            pProfiler->setEnabled(true);
-
-        int method = mBenchmarkMethods[mCurrentMethod];
-
-        switch (mBenchmarkStep)
-        {
-        case 0: // CPU triangulation
-        {
-            mTriangulationType = method;
-            auto start = std::chrono::high_resolution_clock::now();
-            if (mUseCircle)
-                generateCircle();
-            else
-                loadSvg(mSvgPath);
-            auto end = std::chrono::high_resolution_clock::now();
-            mCpuTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
-
-            mWaitFrameCounter = 0;
-            mBenchmarkStep = 1; // wait frames next
-            break;
-        }
-        case 1: // wait frames for stability
-        {
-            const int waitFrames = 50;
-            mWaitFrameCounter++;
-            if (mWaitFrameCounter >= waitFrames)
-            {
-                mGpuFrameCounter = 0;
-                mGpuTimes.clear();
-                mBenchmarkStep = 2; // start GPU measurement
-            }
-            break;
-        }
-        case 2: // measure GPU frames
-        {
-            const int gpuFrames = 100;
-
-            if (pProfiler && pProfiler->isEnabled())
-            {
-                const auto& events = pProfiler->getEvents();
-                for (auto* pEvent : events)
-                {
-                    if (pEvent->getName() == "/onFrameRender")
-                    {
-                        float gpuTime = pEvent->getGpuTime(); // in ms
-                        mGpuTimes.push_back(gpuTime);
-                        break;
-                    }
-                }
-            }
-
-            mGpuFrameCounter++;
-            if (mGpuFrameCounter >= gpuFrames)
-            {
-                // Compute statistics
-                std::sort(mGpuTimes.begin(), mGpuTimes.end());
-                float median = mGpuTimes[mGpuTimes.size() / 2];
-                float mean = std::accumulate(mGpuTimes.begin(), mGpuTimes.end(), 0.0f) / mGpuTimes.size();
-                float sqSum = 0.0f;
-                for (float t : mGpuTimes)
-                    sqSum += (t - mean) * (t - mean);
-                float stddev = std::sqrt(sqSum / mGpuTimes.size());
-
-                // Read helper lane counter
-                uint32_t helperCount = 0;
-                if (mpHelperLaneCounter)
-                {
-                    std::vector<uint8_t> counterData =
-                        getDevice()->getRenderContext()->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
-                    helperCount = *(uint32_t*)counterData.data();
-                }
-
-                // Format CSV line explicitly
-                std::ostringstream oss;
-                oss << method << "  "     // Method
-                    << mCpuTimeMs << "  " // CPU Time
-                    << median << "  "     // GPU Median
-                    << mean << "    "       // GPU Mean
-                    << stddev << "  "     // GPU StdDev
-                    << helperCount;      // Helper Lane Count
-                std::string logLine = oss.str();
-
-                // Add to ImGui log
-                mBenchmarkLog.push_back(logLine);
-
-                // Write to file (columns separate)
-                if (mBenchmarkFile.is_open())
-                    mBenchmarkFile << logLine << "\n";
-
-                // Move to next method
-                mCurrentMethod++;
-                if (mCurrentMethod >= (int)mBenchmarkMethods.size())
-                {
-                    mBenchmarkActive = false;
-                    mBenchmarkStep = 0;
-                    if (mBenchmarkFile.is_open())
-                        mBenchmarkFile.close();
-                    mBenchmarkLog.push_back("Benchmark complete!");
-                }
-                else
-                {
-                    mBenchmarkStep = 0; // next method
-                }
-            }
-            break;
-        }
-        }
+        processBenchmarkStep(pRenderContext);
     }
 
     mpState->setFbo(mpFbo);
