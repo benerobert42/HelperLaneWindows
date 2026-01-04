@@ -4,6 +4,14 @@
 #define READ_BACK_HELPER_LANE_COUNT 0
 #endif
 
+#ifndef USE_DUMMY_TEXTURE
+#define USE_DUMMY_TEXTURE 0
+#endif
+
+#ifndef VIZ_MODE
+#define VIZ_MODE 0
+#endif
+
 struct VSIn
 {
     float2 pos : POSITION;    // expected in [0..1] UV space
@@ -24,6 +32,8 @@ cbuffer Grid
 };
 
 RWTexture2D<uint> gHelperLaneCounter;
+Texture2D<float4> gDummyTexture;
+SamplerState gDummySampler;
 
 V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 {
@@ -40,7 +50,15 @@ V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 
 float4 psMain(V2P input) : SV_Target
 {
+    float dummy = 0.0;
+#if (VIZ_MODE == 0) && USE_DUMMY_TEXTURE
+    uint lane = WaveGetLaneIndex();
+    float2 uv = frac(float2(lane * 0.37, lane * 0.73));
+    dummy = gDummyTexture.Sample(gDummySampler, uv).r;
+#endif
+#if VIZ_MODE == 0
     uint isHelperLane = IsHelperLane() ? 1u : 0u;
+    isHelperLane ^= (dummy > -1.0f ? 0u : 0u); // prevents dead-code elimination
     uint sum =
         QuadReadLaneAt(isHelperLane, 0) +
         QuadReadLaneAt(isHelperLane, 1) +
@@ -63,4 +81,9 @@ float4 psMain(V2P input) : SV_Target
     if (m < 4u && candidate == m) InterlockedAdd(gHelperLaneCounter[0], sum);
 #endif
     return kColors[clamp(sum, 0u, 3u)];
+#elif VIZ_MODE == 1
+    return float4(0, 0, 0, 1);
+#else
+    return gDummyTexture.Sample(gDummySampler, input.pos.xy * 0.5 + 0.5);
+#endif
 }

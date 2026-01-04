@@ -30,6 +30,8 @@
 #include "Core/SampleApp.h"
 #include "Core/Pass/FullScreenPass.h"
 
+#include <fstream>
+
 struct Vertex;
 
 using namespace Falcor;
@@ -61,6 +63,9 @@ private:
     ref<VertexLayout> mpLayout;
     ref<FullScreenPass> mpPass;
     ref<Texture> mpHelperLaneCounter;
+    ref<Texture> mpDummyTexture;
+    ref<RasterizerState> defaultRsState;
+    ref<RasterizerState> wireframeRsState;
 
     // MSAA setup
     void CreateMSAATargets();
@@ -68,7 +73,7 @@ private:
     ref<Texture> mpResolvedTexture;
     uint32_t cntMSAA = 4;
 
-    // === NEW: current polygon (editable)
+    // current polygon (editable)
     std::vector<Vertex> mVertices;
     std::vector<uint32_t> mIndices;
 
@@ -80,7 +85,7 @@ private:
 
     // SVG loading
     std::string mSvgPath;
-    uint32_t mTriangulationType = 0; // 0=EarClipping, 1=MWT, 2=CentroidFan, 3=Greedy, 4=Strip, 5=MaxMin, 6=MinMax, 7=CDT
+    uint32_t mTriangulationType = 0;
     float mMaxBezierDeviation = 1.0f;
 
     // Helper lane count
@@ -93,6 +98,32 @@ private:
     float2 mGridCellSize = float2(1.0f, 1.0f);
     float2 mGridOrigin = float2(0.0f, 0.0f);
     float mGridScale = 1.0f;
+
+    bool mUseDummyTexture = false;
+
+    bool mMeasureTriangulationTime = false;
+    double mLastTriangulationMs = 0.0;
+
+    enum class VizMode : uint32_t
+    {
+        HelperLanes = 0,
+        Wireframe = 1,
+        Texture = 2
+    };
+
+    VizMode mVizMode = VizMode::HelperLanes;
+
+    // Benchmarking state
+    bool mBenchmarkActive = false;
+    int mBenchmarkStep = 0; // 0 = CPU triang, 1 = wait frames, 2 = GPU frames
+    int mCurrentMethod = 0;
+    std::vector<int> mBenchmarkMethods;
+    int mWaitFrameCounter = 0;
+    int mGpuFrameCounter = 0;
+    double mCpuTimeMs = 0.0;
+    std::vector<float> mGpuTimes;
+    std::vector<std::string> mBenchmarkLog; // stores strings to print in ImGui
+    std::ofstream mBenchmarkFile;           // CSV file
 
     void uploadGeometry();
     void loadSvg(const std::string& path);

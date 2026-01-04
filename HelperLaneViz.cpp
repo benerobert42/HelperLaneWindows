@@ -33,6 +33,8 @@
 #include "Falcor.h"
 #include "Core/Program/ProgramManager.h"
 
+#include <chrono>
+
 using namespace Falcor;
 
 FALCOR_EXPORT_D3D12_AGILITY_SDK
@@ -90,8 +92,12 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 
     RasterizerState::Desc rsDesc;
     rsDesc.setCullMode(RasterizerState::CullMode::None);
-    auto pRsState = RasterizerState::create(rsDesc);
-    mpState->setRasterizerState(pRsState);
+    defaultRsState = RasterizerState::create(rsDesc);
+    mpState->setRasterizerState(defaultRsState);
+
+    RasterizerState::Desc wireDesc = rsDesc;
+    wireDesc.setFillMode(RasterizerState::FillMode::Wireframe);
+    wireframeRsState = RasterizerState::create(wireDesc);
 
     mpLayout = VertexLayout::create();
     auto pVbLayout = VertexBufferLayout::create();
@@ -117,6 +123,19 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
         ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
     mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
+
+    uint32_t texWidth = 2048;
+    uint32_t texHeight = 2048;
+    std::vector<uint32_t> pixels(texWidth * texHeight, 0xFF0000FF); // ARGB: A=255, R=0, G=0, B=255
+    mpDummyTexture = getDevice()->createTexture2D(
+        texWidth,
+        texHeight,
+        ResourceFormat::RGBA8Unorm,
+        1,
+        1,
+        pixels.data(),
+        ResourceBindFlags::ShaderResource
+    );
 
     // MSAA render target
     CreateMSAATargets();
@@ -147,14 +166,28 @@ void HelperLaneViz::loadSvg(const std::string& path)
             return Triangulation::minMaxAreaTriangulation(verts, true);
         case 7:
             return Triangulation::constrainedDelaunay(verts);
+        case 8:
+            return Triangulation::earClippingMapbox(verts);
+        case 9:
+            return Triangulation::earClippingMapboxFlipped(verts);
+        case 10:
+            return Triangulation::constrainedDelaunayFlipped(verts);
         default:
             return Triangulation::earClippingTriangulation(verts);
         }
     };
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (SVGLoader::TessellateSvgToMesh(path, mVertices, mIndices, triangulator, mMaxBezierDeviation))
     {
         uploadGeometry();
+    }
+
+    if (mMeasureTriangulationTime)
+    {
+        auto end = std::chrono::high_resolution_clock::now();
+        mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
     }
 }
 
@@ -164,6 +197,8 @@ void HelperLaneViz::generateCircle()
     mIndices.clear();
 
     mVertices = Triangulation::CreateVerticesForEllipse(mCircleVertexCount, mEllipseRadiusX, mEllipseRadiusY, float2(0.5f, 0.5f));
+
+    auto start = std::chrono::high_resolution_clock::now();
 
     switch (mTriangulationType)
     {
@@ -191,9 +226,24 @@ void HelperLaneViz::generateCircle()
     case 7:
         mIndices = Triangulation::constrainedDelaunay(mVertices);
         break;
+    case 8:
+        mIndices = Triangulation::earClippingMapbox(mVertices);
+        break;
+    case 9:
+        mIndices = Triangulation::earClippingMapboxFlipped(mVertices);
+        break;
+    case 10:
+        mIndices = Triangulation::constrainedDelaunayFlipped(mVertices);
+        break;
     default:
         mIndices = Triangulation::earClippingTriangulation(mVertices);
         break;
+    }
+
+    if (mMeasureTriangulationTime)
+    {
+        auto end = std::chrono::high_resolution_clock::now();
+        mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
     }
 
     uploadGeometry();
@@ -253,8 +303,122 @@ void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 
 void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
+    if (mBenchmarkActive)
+    {
+        Profiler* pProfiler = getDevice()->getProfiler();
+        if (pProfiler)
+            pProfiler->setEnabled(true);
+
+        int method = mBenchmarkMethods[mCurrentMethod];
+
+        switch (mBenchmarkStep)
+        {
+        case 0: // CPU triangulation
+        {
+            mTriangulationType = method;
+            auto start = std::chrono::high_resolution_clock::now();
+            if (mUseCircle)
+                generateCircle();
+            else
+                loadSvg(mSvgPath);
+            auto end = std::chrono::high_resolution_clock::now();
+            mCpuTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
+
+            mWaitFrameCounter = 0;
+            mBenchmarkStep = 1; // wait frames next
+            break;
+        }
+        case 1: // wait frames for stability
+        {
+            const int waitFrames = 50;
+            mWaitFrameCounter++;
+            if (mWaitFrameCounter >= waitFrames)
+            {
+                mGpuFrameCounter = 0;
+                mGpuTimes.clear();
+                mBenchmarkStep = 2; // start GPU measurement
+            }
+            break;
+        }
+        case 2: // measure GPU frames
+        {
+            const int gpuFrames = 100;
+
+            if (pProfiler && pProfiler->isEnabled())
+            {
+                const auto& events = pProfiler->getEvents();
+                for (auto* pEvent : events)
+                {
+                    if (pEvent->getName() == "/onFrameRender")
+                    {
+                        float gpuTime = pEvent->getGpuTime(); // in ms
+                        mGpuTimes.push_back(gpuTime);
+                        break;
+                    }
+                }
+            }
+
+            mGpuFrameCounter++;
+            if (mGpuFrameCounter >= gpuFrames)
+            {
+                // Compute statistics
+                std::sort(mGpuTimes.begin(), mGpuTimes.end());
+                float median = mGpuTimes[mGpuTimes.size() / 2];
+                float mean = std::accumulate(mGpuTimes.begin(), mGpuTimes.end(), 0.0f) / mGpuTimes.size();
+                float sqSum = 0.0f;
+                for (float t : mGpuTimes)
+                    sqSum += (t - mean) * (t - mean);
+                float stddev = std::sqrt(sqSum / mGpuTimes.size());
+
+                // Read helper lane counter
+                uint32_t helperCount = 0;
+                if (mpHelperLaneCounter)
+                {
+                    std::vector<uint8_t> counterData =
+                        getDevice()->getRenderContext()->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
+                    helperCount = *(uint32_t*)counterData.data();
+                }
+
+                // Format CSV line explicitly
+                std::ostringstream oss;
+                oss << method << "  "     // Method
+                    << mCpuTimeMs << "  " // CPU Time
+                    << median << "  "     // GPU Median
+                    << mean << "    "       // GPU Mean
+                    << stddev << "  "     // GPU StdDev
+                    << helperCount;      // Helper Lane Count
+                std::string logLine = oss.str();
+
+                // Add to ImGui log
+                mBenchmarkLog.push_back(logLine);
+
+                // Write to file (columns separate)
+                if (mBenchmarkFile.is_open())
+                    mBenchmarkFile << logLine << "\n";
+
+                // Move to next method
+                mCurrentMethod++;
+                if (mCurrentMethod >= (int)mBenchmarkMethods.size())
+                {
+                    mBenchmarkActive = false;
+                    mBenchmarkStep = 0;
+                    if (mBenchmarkFile.is_open())
+                        mBenchmarkFile.close();
+                    mBenchmarkLog.push_back("Benchmark complete!");
+                }
+                else
+                {
+                    mBenchmarkStep = 0; // next method
+                }
+            }
+            break;
+        }
+        }
+    }
+
     mpState->setFbo(mpFbo);
-    const float4 bgColor(0.0f);
+    float4 bgColor = (mVizMode == VizMode::Wireframe) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
+
     if (cntMSAA > 1)
     {
         pRenderContext->clearFbo(mpFbo.get(), bgColor, 1.f, 0);
@@ -270,6 +434,16 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
     {
         pRenderContext->clearUAV(mpHelperLaneCounter->getUAV().get(), uint4(0));
     }
+
+    if (mVizMode == VizMode::Wireframe)
+    {
+        mpState->setRasterizerState(wireframeRsState);
+    }
+    else
+    {
+        mpState->setRasterizerState(defaultRsState);
+    }
+
 
     if (mIndexCount)
     {
@@ -318,9 +492,30 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     // Use built-in circle
     bool modeChanged = w.checkbox("Use Circle", mUseCircle);
 
+    // Visualization mode
+    Gui::DropdownList vizModes = {{0, "Helper Lanes"}, {1, "Wireframe"}, {2, "Texture"}};
+    w.dropdown("Visualization", vizModes, *(uint32_t*)&mVizMode);
+
+    mpProgram->removeDefine("VIZ_MODE");
+    mpProgram->removeDefine("USE_DUMMY_TEXTURE");
+
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+
+    if (mVizMode == VizMode::HelperLanes && mUseDummyTexture)
+    {
+        mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
+        mpVars->setTexture("gDummyTexture", mpDummyTexture);
+    }
+
+    if (mVizMode == VizMode::Texture)
+    {
+        mpVars->setTexture("gDummyTexture", mpDummyTexture);
+    }
+
     // Triangulation type
     Gui::DropdownList triangTypes = {
-        {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"}, {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"}};
+        {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"}, {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"},
+        {8, "Earcut (Mapbox)"}, {9, "Earcut + Flip"}, {10, "CDT + Flip"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
 
     w.separator();
@@ -337,6 +532,24 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     {
         mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
     }
+
+    mpProgram->removeDefine("USE_DUMMY_TEXTURE");
+
+    w.checkbox("Bind dummy texture (force helper lanes)", mUseDummyTexture);
+
+    if (mUseDummyTexture)
+    {
+        mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
+        mpVars->setTexture("gDummyTexture", mpDummyTexture);
+    }
+
+    w.checkbox("Measure triangulation time", mMeasureTriangulationTime);
+
+    if (mMeasureTriangulationTime)
+    {
+        w.text("Last triangulation: %.3f ms", mLastTriangulationMs);
+    }
+
     w.separator();
 
     if (mUseCircle)
@@ -370,6 +583,23 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     if (gridChanged)
     {
         updateGridParams();
+    }
+
+    w.separator();
+    if (w.button("Run Benchmark"))
+    {
+        mBenchmarkActive = true;
+        mBenchmarkStep = 0;
+        mCurrentMethod = 0;
+        mWaitFrameCounter = 0;
+        mGpuFrameCounter = 0;
+        mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}; // skip centroid fan
+        mBenchmarkLog.clear();
+
+        // Open CSV file
+        mBenchmarkFile.open("C:/Users/User/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
+        if (mBenchmarkFile.is_open())
+            mBenchmarkFile << "Method  CPU_Time_ms  GPU_Median_ms   GPU_Mean_ms GPU_StdDev_ms   HelperLaneCount\n";
     }
 }
 
