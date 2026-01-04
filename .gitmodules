@@ -1,0 +1,12 @@
+[submodule "ThirdParty/eigen"]
+	path = ThirdParty/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "ThirdParty/triangle"]
+	path = ThirdParty/triangle
+	url = https://github.com/libigl/triangle.git
+[submodule "ThirdParty/libigl"]
+	path = ThirdParty/libigl
+	url = https://github.com/libigl/libigl.git
+[submodule "ThirdParty/earcut.hpp"]
+	path = ThirdParty/earcut.hpp
+	url = https://github.com/mapbox/earcut.hpp.git
