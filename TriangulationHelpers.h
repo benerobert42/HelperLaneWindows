@@ -39,8 +39,26 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
 std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
 
 // Constrained Delaunay Triangulation - handles any simple polygon including concave.
-// Uses libigl's Triangle library wrapper (falls back to ear clipping if not available).
+// Uses libigl-compatible interface with self-contained CDT implementation.
 std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices);
+
+// Constrained Delaunay Triangulation with edge flip optimization.
+std::vector<uint32_t> constrainedDelaunayFlipped(const std::vector<Vertex>& vertices);
+
+// Ear clipping using mapbox earcut library - fast O(n log n) for simple polygons.
+std::vector<uint32_t> earClippingMapbox(const std::vector<Vertex>& vertices);
+
+// Ear clipping using mapbox earcut, then optimized with edge flips to minimize total edge length.
+std::vector<uint32_t> earClippingMapboxFlipped(const std::vector<Vertex>& vertices);
+
+// Optimize triangulation by flipping edges to minimize total edge length.
+// Uses a priority queue based approach for efficiency.
+std::vector<uint32_t> optimizeByMinLengthFlips(
+    const std::vector<Vertex>& vertices,
+    std::vector<uint32_t> indices,
+    int maxFlips = -1,
+    int maxPops = -1
+);
 
 // Create vertices for an ellipse
 std::vector<Vertex> CreateVerticesForEllipse(uint32_t numSegments, float radiusX, float radiusY, const float2& center);

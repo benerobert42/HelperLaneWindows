@@ -1,12 +1,19 @@
 #include "TriangulationHelpers.h"
 #include "Falcor.h"
 
+#include <include/mapbox/earcut.hpp>
+#include <Eigen/Dense>
+#include <igl/triangle/triangulate.h>
+
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <queue>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 
 using namespace Falcor;
 
@@ -997,9 +1004,445 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
 
 std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices)
 {
-    // Fallback to ear clipping if Eigen/libigl not available
-    // This is a simpler implementation that works for most cases
-    return earClippingTriangulation(vertices);
+    const int vertexCount = static_cast<int>(vertices.size());
+    if (vertexCount < 3)
+    {
+        return std::vector<uint32_t>();
+    }
+
+    // Prepare vertex matrix for libigl
+    Eigen::Matrix<double, Eigen::Dynamic, 2> inputVertices(vertexCount, 2);
+    for (int i = 0; i < vertexCount; ++i) {
+        inputVertices(i, 0) = static_cast<double>(vertices[i].pos.x);
+        inputVertices(i, 1) = static_cast<double>(vertices[i].pos.y);
+    }
+
+    // Define boundary edges (closed polygon)
+    Eigen::Matrix<int, Eigen::Dynamic, 2> boundaryEdges(vertexCount, 2);
+    for (int i = 0; i < vertexCount; ++i)
+    {
+        boundaryEdges(i, 0) = i;
+        boundaryEdges(i, 1) = (i + 1) % vertexCount;
+    }
+
+    // No interior holes
+    Eigen::Matrix<double, Eigen::Dynamic, 2> holes(0, 2);
+
+    // Triangle flags: p = PSLG mode (respects boundary segments), Q = quiet, z = zero-indexed
+    const std::string triangleFlags = "pQz";
+
+    Eigen::Matrix<double, Eigen::Dynamic, 2> outputVertices;
+    Eigen::Matrix<int, Eigen::Dynamic, 3> outputFaces;
+
+    igl::triangle::triangulate(inputVertices, boundaryEdges, holes, triangleFlags, outputVertices, outputFaces);
+
+    // Convert face matrix to flat index array with CCW winding order
+    std::vector<uint32_t> triangleIndices;
+    triangleIndices.reserve(static_cast<size_t>(outputFaces.rows()) * 3);
+    
+    for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex)
+    {
+        int idx0 = outputFaces(faceIndex, 0);
+        int idx1 = outputFaces(faceIndex, 1);
+        int idx2 = outputFaces(faceIndex, 2);
+        
+        // Validate indices are within bounds
+        if (idx0 < 0 || idx0 >= vertexCount || idx1 < 0 || idx1 >= vertexCount || idx2 < 0 || idx2 >= vertexCount)
+        {
+            continue; // Skip invalid triangles
+        }
+        
+        // Ensure CCW winding order
+        if (!isCounterClockwise(vertices, static_cast<uint32_t>(idx0), static_cast<uint32_t>(idx1), static_cast<uint32_t>(idx2)))
+        {
+            // Swap two vertices to make it CCW
+            std::swap(idx1, idx2);
+        }
+        
+        triangleIndices.push_back(static_cast<uint32_t>(idx0));
+        triangleIndices.push_back(static_cast<uint32_t>(idx1));
+        triangleIndices.push_back(static_cast<uint32_t>(idx2));
+    }
+
+    return triangleIndices;
+}
+
+std::vector<uint32_t> constrainedDelaunayFlipped(const std::vector<Vertex>& vertices)
+{
+    // First get CDT triangulation
+    std::vector<uint32_t> indices = constrainedDelaunay(vertices);
+
+    // Then optimize with edge flips
+    if (!indices.empty())
+    {
+        indices = optimizeByMinLengthFlips(vertices, indices);
+    }
+
+    return indices;
+}
+
+// Helper functions for edge flip optimization
+namespace
+{
+
+inline double orient2D(const Vertex& a, const Vertex& b, const Vertex& c)
+{
+    const double ax = a.pos.x, ay = a.pos.y;
+    const double bx = b.pos.x, by = b.pos.y;
+    const double cx = c.pos.x, cy = c.pos.y;
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+inline bool isConvexQuad(const std::vector<Vertex>& V, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    // a and b must be on opposite sides of cd, and c and d opposite sides of ab
+    const double o1 = orient2D(V[a], V[b], V[c]);
+    const double o2 = orient2D(V[a], V[b], V[d]);
+    if (o1 == 0.0 || o2 == 0.0 || ((o1 > 0) == (o2 > 0)))
+        return false;
+    const double o3 = orient2D(V[c], V[d], V[a]);
+    const double o4 = orient2D(V[c], V[d], V[b]);
+    if (o3 == 0.0 || o4 == 0.0 || ((o3 > 0) == (o4 > 0)))
+        return false;
+    return true;
+}
+
+struct EdgeKey
+{
+    uint32_t a;
+    uint32_t b;
+    bool operator==(const EdgeKey& o) const { return a == o.a && b == o.b; }
+};
+
+struct EdgeKeyHash
+{
+    size_t operator()(const EdgeKey& k) const noexcept
+    {
+        // 64-bit mix of two 32-bit ints
+        return (size_t(k.a) << 32) ^ size_t(k.b);
+    }
+};
+
+struct EdgeAdj
+{
+    int t0 = -1;
+    int t1 = -1;
+    uint32_t opp0 = 0;
+    uint32_t opp1 = 0;
+    uint32_t ver = 0; // bump on any mutation
+};
+
+inline EdgeKey makeKey(uint32_t u, uint32_t v)
+{
+    return EdgeKey{std::min(u, v), std::max(u, v)};
+}
+
+inline std::array<uint32_t, 3> makeCCW(const std::vector<Vertex>& v, uint32_t i0, uint32_t i1, uint32_t i2)
+{
+    // If (i0,i1,i2) is CCW keep, else swap i1/i2
+    if (cross2D(v[i0].pos, v[i1].pos, v[i2].pos) >= 0.0f)
+    {
+        return {i0, i1, i2};
+    }
+    else
+    {
+        return {i0, i2, i1};
+    }
+}
+
+} // anonymous namespace
+
+std::vector<uint32_t> optimizeByMinLengthFlips(
+    const std::vector<Vertex>& vertices,
+    std::vector<uint32_t> indices,
+    int maxFlips,
+    int maxPops
+)
+{
+    const int triCount = int(indices.size() / 3);
+    if (triCount <= 0)
+    {
+        return indices;
+    }
+
+    auto tri = [&](int t, int k) -> uint32_t& { return indices[3 * t + k]; };
+    auto tric = [&](int t, int k) -> uint32_t { return indices[3 * t + k]; };
+
+    std::unordered_map<EdgeKey, EdgeAdj, EdgeKeyHash> adj;
+    adj.reserve(indices.size() * 2);
+
+    // u, v are indices of the edge endpoints
+    // triangle is the triangle index in which the edge lies
+    // ov is the index of the vertex opposite of the edge in the respective triangle
+    auto addEdge = [&](uint32_t u, uint32_t v, int triangle, uint32_t ov)
+    {
+        EdgeKey key = makeKey(u, v);
+        auto& edge = adj[key];
+        // any write mutates bump version
+        ++edge.ver;
+        if (edge.t0 == -1)
+        {
+            edge.t0 = triangle;
+            edge.opp0 = ov;
+        }
+        else
+        {
+            edge.t1 = triangle;
+            edge.opp1 = ov;
+        }
+    };
+
+    auto rebuildTriangle = [&](int t)
+    {
+        const uint32_t a = tric(t, 0);
+        const uint32_t b = tric(t, 1);
+        const uint32_t c = tric(t, 2);
+        addEdge(a, b, t, c);
+        addEdge(b, c, t, a);
+        addEdge(c, a, t, b);
+    };
+
+    auto clearTriangle = [&](int t)
+    {
+        const uint32_t a = tric(t, 0);
+        const uint32_t b = tric(t, 1);
+        const uint32_t c = tric(t, 2);
+        const EdgeKey e0 = makeKey(a, b);
+        const EdgeKey e1 = makeKey(b, c);
+        const EdgeKey e2 = makeKey(c, a);
+        auto clearEdge = [&](const EdgeKey& k)
+        {
+            auto it = adj.find(k);
+            if (it == adj.end())
+            {
+                return;
+            }
+            auto& E = it->second;
+            // any write mutates bump version
+            ++E.ver;
+            if (E.t0 == t)
+            {
+                E.t0 = -1;
+                E.opp0 = 0;
+            }
+            if (E.t1 == t)
+            {
+                E.t1 = -1;
+                E.opp1 = 0;
+            }
+        };
+        clearEdge(e0);
+        clearEdge(e1);
+        clearEdge(e2);
+    };
+
+    for (int t = 0; t < triCount; ++t)
+    {
+        rebuildTriangle(t);
+    }
+
+    // Priority queue of candidate flips (max gain first)
+    struct Candidate
+    {
+        double gain; // >0 is improving
+        EdgeKey key;
+        uint32_t ver;
+    };
+
+    struct CandidateLess
+    {
+        bool operator()(const Candidate& a, const Candidate& b) const { return a.gain < b.gain; } // max-heap
+    };
+
+    std::priority_queue<Candidate, std::vector<Candidate>, CandidateLess> pq;
+
+    auto len2 = [&](uint32_t i, uint32_t j) -> float
+    {
+        const float2 diff = vertices[i].pos - vertices[j].pos;
+        return dot(diff, diff);
+    };
+
+    auto tryPushEdge = [&](const EdgeKey& k)
+    {
+        auto it = adj.find(k);
+        if (it == adj.end())
+        {
+            return;
+        }
+        const auto& E = it->second;
+        if (E.t0 == -1 || E.t1 == -1)
+        {
+            return; // Edge is not 2 sided (likely boundary)
+        }
+        const uint32_t a = k.a;
+        const uint32_t b = k.b;
+        const uint32_t c = E.opp0;
+        const uint32_t d = E.opp1;
+        if (!isConvexQuad(vertices, a, b, c, d))
+        {
+            return;
+        }
+        // improving if new diagonal shorter
+        const double oldD = len2(a, b);
+        const double newD = len2(c, d);
+        const double gain = oldD - newD;
+        if (gain <= 0.0)
+        {
+            return;
+        }
+        pq.push(Candidate{gain, k, E.ver});
+    };
+
+    for (const auto& [k, e] : adj)
+    {
+        (void)e;
+        tryPushEdge(k);
+    }
+
+    auto pushTriEdges = [&](int t)
+    {
+        const uint32_t a = tric(t, 0);
+        const uint32_t b = tric(t, 1);
+        const uint32_t c = tric(t, 2);
+        tryPushEdge(makeKey(a, b));
+        tryPushEdge(makeKey(b, c));
+        tryPushEdge(makeKey(c, a));
+    };
+
+    int flips = 0;
+    int pops = 0;
+    while (!pq.empty())
+    {
+        if (maxPops >= 0 && pops >= maxPops)
+        {
+            break;
+        }
+        ++pops;
+        const Candidate candidate = pq.top();
+        pq.pop();
+
+        auto it = adj.find(candidate.key);
+        if (it == adj.end())
+        {
+            continue;
+        }
+        auto& E = it->second;
+        if (E.ver != candidate.ver)
+        {
+            continue;
+        }
+        if (E.t0 == -1 || E.t1 == -1)
+        {
+            continue; // not interior
+        }
+        const uint32_t a = candidate.key.a;
+        const uint32_t b = candidate.key.b;
+        const uint32_t c = E.opp0;
+        const uint32_t d = E.opp1;
+        const int t0 = E.t0;
+        const int t1 = E.t1;
+
+        // Re-check (neighbors may have moved but ver guard usually catches)
+        if (!isConvexQuad(vertices, a, b, c, d))
+        {
+            continue;
+        }
+        const double oldD = len2(a, b);
+        const double newD = len2(c, d);
+        if (newD >= oldD)
+        {
+            continue; // no longer improving
+        }
+        // Optional hard cap on number of flips
+        if (maxFlips >= 0 && flips >= maxFlips)
+        {
+            break;
+        }
+
+        // Build new triangles using the other diagonal (c-d)
+        const auto T0 = makeCCW(vertices, c, d, a);
+        const auto T1 = makeCCW(vertices, d, c, b);
+
+        // Update mesh
+        clearTriangle(t0);
+        clearTriangle(t1);
+        tri(t0, 0) = T0[0];
+        tri(t0, 1) = T0[1];
+        tri(t0, 2) = T0[2];
+        tri(t1, 0) = T1[0];
+        tri(t1, 1) = T1[1];
+        tri(t1, 2) = T1[2];
+        rebuildTriangle(t0);
+        rebuildTriangle(t1);
+
+        // Re-enqueue affected neighborhood (only local)
+        pushTriEdges(t0);
+        pushTriEdges(t1);
+
+        ++flips;
+    }
+
+    return indices;
+}
+
+std::vector<uint32_t> earClippingMapbox(const std::vector<Vertex>& vertices)
+{
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+    if (n < 3)
+    {
+        return indices;
+    }
+
+    // Convert Vertex format to earcut format (std::vector<std::vector<Point>>)
+    // earcut expects: std::vector<std::vector<std::array<Coord, 2>>>
+    using Point = std::array<double, 2>;
+    std::vector<std::vector<Point>> polygon;
+
+    // Create the main polygon contour
+    std::vector<Point> contour;
+    contour.reserve(n);
+    for (const auto& v : vertices)
+    {
+        contour.push_back({static_cast<double>(v.pos.x), static_cast<double>(v.pos.y)});
+    }
+    polygon.push_back(std::move(contour));
+
+    // Run earcut triangulation
+    // Returns array of indices that refer to the vertices of the input polygon
+    indices = mapbox::earcut<uint32_t>(polygon);
+
+    return indices;
+}
+
+std::vector<uint32_t> earClippingMapboxFlipped(const std::vector<Vertex>& vertices)
+{
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+    if (n < 3)
+    {
+        return indices;
+    }
+
+    // Convert Vertex format to earcut format
+    using Point = std::array<double, 2>;
+    std::vector<std::vector<Point>> polygon;
+
+    std::vector<Point> contour;
+    contour.reserve(n);
+    for (const auto& v : vertices)
+    {
+        contour.push_back({static_cast<double>(v.pos.x), static_cast<double>(v.pos.y)});
+    }
+    polygon.push_back(std::move(contour));
+
+    // Run earcut triangulation
+    indices = mapbox::earcut<uint32_t>(polygon);
+
+    // Optimize with edge flips
+    indices = optimizeByMinLengthFlips(vertices, indices);
+
+    return indices;
 }
 
 std::vector<Vertex> CreateVerticesForEllipse(uint32_t numSegments, float radiusX, float radiusY, const float2& center)
