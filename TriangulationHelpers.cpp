@@ -20,6 +20,208 @@ using namespace Falcor;
 namespace Triangulation
 {
 
+// MARK: - Helpers Namespace
+
+namespace Helpers
+{
+
+struct DiagonalTable
+{
+    std::vector<std::vector<bool>> isDiagonal; // [n][n]
+    bool polygonIsCCW = true;
+};
+
+inline double Cross2D(const float2& p1, const float2& p2, const float2& p3)
+{
+    return static_cast<double>((p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x));
+}
+
+inline double EdgeLength(const Vertex& vertexA, const Vertex& vertexB)
+{
+    float2 diff = vertexB.pos - vertexA.pos;
+    return std::sqrt(static_cast<double>(dot(diff, diff)));
+}
+
+inline double TriangleArea(const std::vector<Vertex>& vertices, int i, int j, int k)
+{
+    const float2 ab = vertices[j].pos - vertices[i].pos;
+    const float2 ac = vertices[k].pos - vertices[i].pos;
+    return std::abs(static_cast<double>(ab.x * ac.y - ab.y * ac.x)) * 0.5;
+}
+
+inline double PolygonSignedArea(const std::vector<Vertex>& vertices)
+{
+    const size_t vertexCount = vertices.size();
+    double signedAreaSum = 0.0;
+
+    for (size_t i = 0; i < vertexCount; ++i)
+    {
+        const auto& current = vertices[i].pos;
+        const auto& next = vertices[(i + 1) % vertexCount].pos;
+        signedAreaSum += static_cast<double>(current.x) * static_cast<double>(next.y) - static_cast<double>(current.y) * static_cast<double>(next.x);
+    }
+
+    return 0.5 * signedAreaSum;
+}
+
+bool PointInsidePolygon(const float2& p, const std::vector<Vertex>& vertices)
+{
+    const size_t n = vertices.size();
+    if (n < 3)
+    {
+        return false;
+    }
+
+    int crossings = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto& a = vertices[i].pos;
+        const auto& b = vertices[(i + 1) % n].pos;
+        if ((a.y <= p.y && b.y > p.y) || (b.y <= p.y && a.y > p.y))
+        {
+            float t = (p.y - a.y) / (b.y - a.y);
+            if (p.x < a.x + t * (b.x - a.x))
+            {
+                crossings++;
+            }
+        }
+    }
+    return (crossings % 2) == 1;
+}
+
+bool SegmentsIntersect(const float2& p1, const float2& p2, const float2& q1, const float2& q2)
+{
+    const double d1 = Cross2D(p1, p2, q1);
+    const double d2 = Cross2D(p1, p2, q2);
+    const double d3 = Cross2D(q1, q2, p1);
+    const double d4 = Cross2D(q1, q2, p2);
+
+    // Segments intersect if points are on opposite sides
+    if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
+    {
+        if ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsAdjacent(int vertexA, int vertexB, size_t vertexCount)
+{
+    return (vertexA + 1) % vertexCount == vertexB || (vertexB + 1) % vertexCount == vertexA;
+}
+
+DiagonalTable BuildDiagonalTable(const std::vector<Vertex>& poly)
+{
+    DiagonalTable out;
+    const size_t n = poly.size();
+    out.isDiagonal.assign(n, std::vector<bool>(n, false));
+    out.polygonIsCCW = PolygonSignedArea(poly) > 0.0;
+
+    auto isValidDiagonal = [&](int i, int j)
+    {
+        if (i == j || IsAdjacent(i, j, n))
+        {
+            return false;
+        }
+
+        const float2& a = poly[i].pos;
+        const float2& b = poly[j].pos;
+
+        // Midpoint must be inside polygon
+        float2 mid = 0.5f * (a + b);
+        if (!PointInsidePolygon(mid, poly))
+        {
+            return false;
+        }
+
+        // Must not properly intersect any polygon edge (except shared endpoints)
+        for (int v = 0; v < static_cast<int>(n); ++v)
+        {
+            const int vNext = (v + 1) % static_cast<int>(n);
+            // skip edges incident to i or j
+            if (v == i || vNext == i || v == j || vNext == j)
+            {
+                continue;
+            }
+
+            const float2& c = poly[v].pos;
+            const float2& d = poly[vNext].pos;
+
+            if (SegmentsIntersect(a, b, c, d))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    for (int i = 0; i < static_cast<int>(n); ++i)
+    {
+        for (int j = i + 1; j < static_cast<int>(n); ++j)
+        {
+            if (isValidDiagonal(i, j))
+            {
+                out.isDiagonal[i][j] = out.isDiagonal[j][i] = true;
+            }
+        }
+    }
+
+    return out;
+}
+
+bool IsTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, int j, int k, const DiagonalTable& diagTable)
+{
+    // Check if all edges of the triangle are either polygon edges or valid diagonals
+    const int n = static_cast<int>(vertices.size());
+    
+    auto isEdgeOrDiagonal = [&](int a, int b) -> bool
+    {
+        if (IsAdjacent(a, b, n))
+            return true;
+        if (a < b)
+            return diagTable.isDiagonal[a][b];
+        else
+            return diagTable.isDiagonal[b][a];
+    };
+
+    if (!isEdgeOrDiagonal(i, j) || !isEdgeOrDiagonal(j, k) || !isEdgeOrDiagonal(k, i))
+    {
+        return false;
+    }
+
+    // Check triangle center is inside polygon
+    const float2& pA = vertices[i].pos;
+    const float2& pB = vertices[j].pos;
+    const float2& pC = vertices[k].pos;
+    float2 center = {(pA.x + pB.x + pC.x) / 3.0f, (pA.y + pB.y + pC.y) / 3.0f};
+    if (!PointInsidePolygon(center, vertices))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+std::vector<uint32_t> BuildCCWOrder(const std::vector<Vertex>& vertices)
+{
+    const size_t vertexCount = vertices.size();
+    std::vector<uint32_t> order(vertexCount);
+
+    const bool isAlreadyCCW = PolygonSignedArea(vertices) >= 0.0;
+
+    for (size_t i = 0; i < vertexCount; ++i)
+    {
+        order[i] = isAlreadyCCW ? static_cast<uint32_t>(i) : static_cast<uint32_t>(vertexCount - 1 - i);
+    }
+
+    return order;
+}
+
+} // namespace Helpers
+
 // MARK: - Geometry Helper Functions
 
 namespace
@@ -381,14 +583,27 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
         return indices;
     }
 
+    Helpers::DiagonalTable diagTable;
+    if (shouldHandleConcave)
+    {
+        diagTable = Helpers::BuildDiagonalTable(vertices);
+    }
+
     // DP tables:
     // dp[i][j] = minimum edge weight to triangulate polygon from i to j
     // split[i][j] = optimal split point k for the interval [i, j]
     std::vector<double> dpTable(vertexCount * vertexCount, 0.0);
     std::vector<int> splitTable(vertexCount * vertexCount, -1);
 
-    auto dp = [&](int i, int j) -> double& { return dpTable[i * vertexCount + j]; };
-    auto split = [&](int i, int j) -> int& { return splitTable[i * vertexCount + j]; };
+    auto dp = [&](int i, int j) -> double&
+    {
+        return dpTable[i * vertexCount + j];
+    };
+
+    auto split = [&](int i, int j) -> int&
+    {
+        return splitTable[i * vertexCount + j];
+    };
 
     // Initialize: adjacent vertices need no triangulation
     for (int i = 0; i < vertexCount - 1; ++i)
@@ -408,28 +623,28 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
 
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint)
             {
-                // For concave polygons, check if triangle is valid
                 if (shouldHandleConcave)
-                { // likely not needed
-                    if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex))
+                {
+                    if (!Helpers::IsTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex, diagTable))
                     {
                         continue;
                     }
                 }
                 else
                 {
-                    // For convex polygons, still check triangle has positive area (degenerate check)
-                    const double area = triangleArea(vertices, startIndex, splitPoint, endIndex);
+                    const double area = Helpers::TriangleArea(vertices, startIndex, splitPoint, endIndex);
                     if (area <= 0.0)
                     {
-                        continue; // Skip degenerate triangles
+                        continue;
                     }
                 }
 
                 // Cost = left subproblem + right subproblem + new internal edges
-                const double internalEdgeCost =
-                    edgeLength(vertices[startIndex], vertices[splitPoint]) + edgeLength(vertices[splitPoint], vertices[endIndex]);
-                const double totalCost = dp(startIndex, splitPoint) + dp(splitPoint, endIndex) + internalEdgeCost;
+                const double internalEdgeCost = Helpers::EdgeLength(vertices[startIndex], vertices[splitPoint])
+                               + Helpers::EdgeLength(vertices[splitPoint], vertices[endIndex]);
+                const double totalCost = dp(startIndex, splitPoint)
+                            + dp(splitPoint, endIndex)
+                            + internalEdgeCost;
 
                 if (totalCost < minimumCost)
                 {
@@ -445,18 +660,15 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
 
     // Reconstruct triangles via recursive traversal
     indices.reserve(3 * (vertexCount - 2));
-
     std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex)
     {
         const int splitPoint = split(startIndex, endIndex);
         if (splitPoint < 0)
         {
-            // No split point found - this shouldn't happen for valid triangulation
-            // For closed polygons, if we can't find a split, the edge might be a boundary edge
+            // No split point found
             return;
         }
 
-        // Emit triangle (startIndex, splitPoint, endIndex)
         indices.push_back(static_cast<uint32_t>(startIndex));
         indices.push_back(static_cast<uint32_t>(splitPoint));
         indices.push_back(static_cast<uint32_t>(endIndex));
@@ -473,27 +685,13 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
     };
 
     // For closed polygons, we need to triangulate the full chain [0, vertexCount-1]
-    // The algorithm already handles this, but we need to ensure it completes
     emitTriangles(0, vertexCount - 1);
 
-    // Verify we got the expected number of triangles (n-2 for n vertices)
-    // If we got fewer, the DP table might not have been filled correctly
     const size_t expectedTriangles = vertexCount - 2;
     if (indices.size() / 3 < expectedTriangles)
     {
-        // Fallback: the DP might have failed, try a simpler approach for convex polygons
-        if (!shouldHandleConcave)
-        {
-            // For convex polygons, use fan triangulation from vertex 0
-            indices.clear();
-            indices.reserve(3 * expectedTriangles);
-            for (int i = 1; i < vertexCount - 1; ++i)
-            {
-                indices.push_back(0);
-                indices.push_back(static_cast<uint32_t>(i));
-                indices.push_back(static_cast<uint32_t>(i + 1));
-            }
-        }
+        static_assert(true, "Triangulation not sussecful");
+        return {};
     }
 
     return indices;
@@ -545,16 +743,18 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
     std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
 
+    const auto diagTable = Helpers::BuildDiagonalTable(vertices);
     if (vertexCount < 3)
     {
         return indices;
     }
 
-    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
+    // For convex polygons, skip CCW order rebuild
     std::vector<uint32_t> ccwOrder;
+
     if (shouldHandleConcave)
     {
-        ccwOrder = buildCCWOrder(vertices);
+        ccwOrder = Helpers::BuildCCWOrder(vertices);
     }
     else
     {
@@ -564,7 +764,8 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
 
     // Recursive solver: triangulates a sub-polygon by selecting the largest triangle
     // polygon is indices into ccwOrder array (which gives actual vertex indices)
-    std::function<void(const std::vector<size_t>&)> triangulateSubPolygon = [&](const std::vector<size_t>& polygon)
+    std::function<void(const std::vector<size_t>&)> triangulateSubPolygon =
+        [&](const std::vector<size_t>& polygon)
     {
         const size_t polygonSize = polygon.size();
 
@@ -597,14 +798,11 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                     uint32_t vj = ccwOrder[polygon[j]];
                     uint32_t vk = ccwOrder[polygon[k]];
 
-                    // Calculate area first (needed for both validation and selection)
-                    const double area = triangleArea(vertices, vi, vj, vk);
+                    const double area = Helpers::TriangleArea(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk));
 
-                    // For convex polygons (shouldHandleConcave=false), check triangle has positive area
-                    // For concave polygons, we need full validity check
                     if (shouldHandleConcave)
                     {
-                        if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk)))
+                        if (!Helpers::IsTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk), diagTable))
                         {
                             continue;
                         }
@@ -613,8 +811,11 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                     {
                         // For convex polygons, still ensure triangle has positive area (degenerate check)
                         if (area <= 0.0)
+                        {
                             continue;
+                        }
                     }
+
                     if (area > largestArea)
                     {
                         largestArea = area;
@@ -685,6 +886,7 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
         // Each arc includes both endpoints to form closed sub-polygons
         const auto arcAB = buildArc(bestI, bestJ);
         const auto arcBC = buildArc(bestJ, bestK);
+
         // arcCA wraps from bestK back to bestI (closed polygon)
         std::vector<size_t> arcCA;
         arcCA.push_back(polygon[bestK]); // Include endpoint
@@ -799,16 +1001,10 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
         return indices;
     }
 
-    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
-    std::vector<uint32_t> ccwOrder;
+    Helpers::DiagonalTable diagTable;
     if (shouldHandleConcave)
     {
-        ccwOrder = buildCCWOrder(vertices);
-    }
-    else
-    {
-        ccwOrder.resize(vertexCount);
-        std::iota(ccwOrder.begin(), ccwOrder.end(), 0);
+        diagTable = Helpers::BuildDiagonalTable(vertices);
     }
 
     // DP tables: dp[i][j] = maximum achievable minimum triangle area for chain [i, j]
@@ -828,67 +1024,67 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
     // Fill DP table for increasing chain lengths
     for (int chainLength = 2; chainLength < vertexCount; ++chainLength)
     {
-        for (int startIndex = 0; startIndex + chainLength < vertexCount; ++startIndex)
+        for (int start = 0; start + chainLength < vertexCount; ++start)
         {
-            const int endIndex = startIndex + chainLength;
+            const int end = start + chainLength;
 
             double bestMinArea = 0.0;
-            int optimalSplit = -1;
+            int bestSplit = -1;
 
-            for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint)
+            for (int mid = start + 1; mid < end; ++mid)
             {
-                const uint32_t originalA = ccwOrder[startIndex];
-                const uint32_t originalB = ccwOrder[splitPoint];
-                const uint32_t originalC = ccwOrder[endIndex];
-
                 if (shouldHandleConcave)
                 {
-                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC))
+                    if (!Helpers::IsTriangleInsidePolygon(vertices, start, mid, end, diagTable))
+                    {
                         continue;
+                    }
+                }
+                else
+                {
+                    if (Helpers::TriangleArea(vertices, start, mid, end) <= 0.0)
+                    {
+                        continue;
+                    }
                 }
 
-                const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
+                const double triArea = Helpers::TriangleArea(vertices, start, mid, end);
 
-                // Bottleneck = minimum of {left subproblem, right subproblem, this triangle}
-                const double bottleneck = std::min({dp(startIndex, splitPoint), dp(splitPoint, endIndex), currentTriangleArea});
+                // Bottleneck for the chain = min(left, right, this triangle)
+                const double bottleneck = std::min({dp(start, mid), dp(mid, end), triArea});
 
                 if (bottleneck > bestMinArea)
                 {
                     bestMinArea = bottleneck;
-                    optimalSplit = splitPoint;
+                    bestSplit = mid;
                 }
             }
 
-            dp(startIndex, endIndex) = bestMinArea;
-            split(startIndex, endIndex) = optimalSplit;
+            dp(start, end) = bestMinArea;
+            split(start, end) = bestSplit;
         }
     }
 
-    // Reconstruct triangles with CCW orientation
+    // Reconstruct triangles (respect CCW orientation)
     indices.reserve(3 * (vertexCount - 2));
-
-    std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex)
+    std::function<void(int, int)> emitTriangles = [&](int start, int end)
     {
-        const int splitPoint = split(startIndex, endIndex);
-        if (splitPoint < 0)
+        const int mid = split(start, end);
+        if (mid < 0)
             return;
 
-        uint32_t indexA = ccwOrder[startIndex];
-        uint32_t indexB = ccwOrder[splitPoint];
-        uint32_t indexC = ccwOrder[endIndex];
+        indices.push_back(start);
+        indices.push_back(mid);
+        indices.push_back(end);
 
-        // Ensure CCW orientation
-        if (!isCounterClockwise(vertices, indexA, indexB, indexC))
+        if (mid > start + 1)
         {
-            std::swap(indexB, indexC);
+            emitTriangles(start, mid);
         }
-
-        indices.push_back(indexA);
-        indices.push_back(indexB);
-        indices.push_back(indexC);
-
-        emitTriangles(startIndex, splitPoint);
-        emitTriangles(splitPoint, endIndex);
+        if (end > mid + 1)
+        {
+            emitTriangles(mid, end);
+        }
     };
 
     emitTriangles(0, vertexCount - 1);
@@ -906,16 +1102,10 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
         return indices;
     }
 
-    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
-    std::vector<uint32_t> ccwOrder;
+    Helpers::DiagonalTable diagTable;
     if (shouldHandleConcave)
     {
-        ccwOrder = buildCCWOrder(vertices);
-    }
-    else
-    {
-        ccwOrder.resize(vertexCount);
-        std::iota(ccwOrder.begin(), ccwOrder.end(), 0);
+        diagTable = Helpers::BuildDiagonalTable(vertices);
     }
 
     // DP tables: dp[i][j] = minimum achievable maximum triangle area for chain [i, j]
@@ -934,67 +1124,63 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
     // Fill DP table for increasing chain lengths
     for (int chainLength = 2; chainLength < vertexCount; ++chainLength)
     {
-        for (int startIndex = 0; startIndex + chainLength < vertexCount; ++startIndex)
+        for (int start = 0; start + chainLength < vertexCount; ++start)
         {
-            const int endIndex = startIndex + chainLength;
+            const int end = start + chainLength;
 
             double bestMaxArea = std::numeric_limits<double>::infinity();
-            int optimalSplit = -1;
+            int bestSplit = -1;
 
-            for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint)
+            for (int mid = start + 1; mid < end; ++mid)
             {
-                const uint32_t originalA = ccwOrder[startIndex];
-                const uint32_t originalB = ccwOrder[splitPoint];
-                const uint32_t originalC = ccwOrder[endIndex];
-
                 if (shouldHandleConcave)
                 {
-                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC))
+                    if (!Helpers::IsTriangleInsidePolygon(vertices, start, mid, end, diagTable))
+                    {
                         continue;
+                    }
+                }
+                else
+                {
+                    if (Helpers::TriangleArea(vertices, start, mid, end) <= 0.0)
+                    {
+                        continue;
+                    }
                 }
 
-                const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
+                const double triArea = Helpers::TriangleArea(vertices, start, mid, end);
 
                 // Cost = maximum of {left subproblem, right subproblem, this triangle}
-                const double cost = std::max({dp(startIndex, splitPoint), dp(splitPoint, endIndex), currentTriangleArea});
+                const double cost = std::max({dp(start, mid), dp(mid, end), triArea});
 
                 if (cost < bestMaxArea)
                 {
                     bestMaxArea = cost;
-                    optimalSplit = splitPoint;
+                    bestSplit = mid;
                 }
             }
 
-            dp(startIndex, endIndex) = bestMaxArea;
-            split(startIndex, endIndex) = optimalSplit;
+            dp(start, end) = bestMaxArea;
+            split(start, end) = bestSplit;
         }
     }
 
     // Reconstruct triangles with CCW orientation
     indices.reserve(3 * (vertexCount - 2));
-
-    std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex)
+    std::function<void(int, int)> emitTriangles = [&](int start, int end)
     {
-        const int splitPoint = split(startIndex, endIndex);
-        if (splitPoint < 0)
+        const int mid = split(start, end);
+        if (mid < 0)
             return;
 
-        uint32_t indexA = ccwOrder[startIndex];
-        uint32_t indexB = ccwOrder[splitPoint];
-        uint32_t indexC = ccwOrder[endIndex];
+        indices.push_back(start);
+        indices.push_back(mid);
+        indices.push_back(end);
 
-        // Ensure CCW orientation
-        if (!isCounterClockwise(vertices, indexA, indexB, indexC))
-        {
-            std::swap(indexB, indexC);
-        }
-
-        indices.push_back(indexA);
-        indices.push_back(indexB);
-        indices.push_back(indexC);
-
-        emitTriangles(startIndex, splitPoint);
-        emitTriangles(splitPoint, endIndex);
+        if (mid > start + 1)
+            emitTriangles(start, mid);
+        if (end > mid + 1)
+            emitTriangles(mid, end);
     };
 
     emitTriangles(0, vertexCount - 1);
@@ -1012,7 +1198,8 @@ std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices)
 
     // Prepare vertex matrix for libigl
     Eigen::Matrix<double, Eigen::Dynamic, 2> inputVertices(vertexCount, 2);
-    for (int i = 0; i < vertexCount; ++i) {
+    for (int i = 0; i < vertexCount; ++i)
+    {
         inputVertices(i, 0) = static_cast<double>(vertices[i].pos.x);
         inputVertices(i, 1) = static_cast<double>(vertices[i].pos.y);
     }
@@ -1039,26 +1226,26 @@ std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices)
     // Convert face matrix to flat index array with CCW winding order
     std::vector<uint32_t> triangleIndices;
     triangleIndices.reserve(static_cast<size_t>(outputFaces.rows()) * 3);
-    
+
     for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex)
     {
         int idx0 = outputFaces(faceIndex, 0);
         int idx1 = outputFaces(faceIndex, 1);
         int idx2 = outputFaces(faceIndex, 2);
-        
+
         // Validate indices are within bounds
         if (idx0 < 0 || idx0 >= vertexCount || idx1 < 0 || idx1 >= vertexCount || idx2 < 0 || idx2 >= vertexCount)
         {
             continue; // Skip invalid triangles
         }
-        
+
         // Ensure CCW winding order
         if (!isCounterClockwise(vertices, static_cast<uint32_t>(idx0), static_cast<uint32_t>(idx1), static_cast<uint32_t>(idx2)))
         {
             // Swap two vertices to make it CCW
             std::swap(idx1, idx2);
         }
-        
+
         triangleIndices.push_back(static_cast<uint32_t>(idx0));
         triangleIndices.push_back(static_cast<uint32_t>(idx1));
         triangleIndices.push_back(static_cast<uint32_t>(idx2));
