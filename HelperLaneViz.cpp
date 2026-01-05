@@ -108,11 +108,9 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     pVbLayout->addElement("POSITION", 0, ResourceFormat::RG32Float, 1, 0);
     mpLayout->addBufferLayout(0, pVbLayout);
 
-    // Load SVG file (default path, can be changed via GUI)
     mSvgPath = "C:/Users/ShaprIntel/Downloads/1920560.svg";
     loadSvg(mSvgPath);
 
-    // Enable profiler for GPU frametime measurement
     getDevice()->getProfiler()->setEnabled(true);
 
     updateGridParams();
@@ -315,7 +313,9 @@ std::string selectFolder()
 void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
 {
     if (folderPath.empty())
+    {
         return;
+    }
 
     mFolderFiles.clear();
     for (const auto& entry : std::filesystem::directory_iterator(folderPath))
@@ -332,18 +332,22 @@ void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
     }
 
     if (mFolderFiles.empty())
+    {
         return;
+    }
 
     mBenchmarkOutputPath = folderPath + "/benchmark_results.txt";
     mBenchmarkFile.open(mBenchmarkOutputPath, std::ios::out | std::ios::trunc);
     if (!mBenchmarkFile.is_open())
+    {
         return;
+    }
 
     mBenchmarkFile << "File,Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount\n";
 
     mBenchmarkFolderActive = true;
     mCurrentFolderFile = 0;
-    mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
+    mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}; // Skip centroid fan
     mCurrentMethod = 0;
     mBenchmarkStep = 0;
     mWaitFrameCounter = 0;
@@ -381,9 +385,13 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
         mTriangulationType = method;
         auto start = std::chrono::high_resolution_clock::now();
         if (mUseCircle)
+        {
             generateCircle();
+        }
         else
+        {
             loadSvg(mSvgPath);
+        }
         auto end = std::chrono::high_resolution_clock::now();
         mCpuTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
 
@@ -443,17 +451,22 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
             mReadBackHelperLaneCount = false;
             mpProgram->removeDefine("READ_BACK_HELPER_LANE_COUNT");
 
+            size_t totalEdgeLength;
+            double uniqueEdgeLength;
+            Triangulation::ComputeEdgeMetrics(mVertices, mIndices, totalEdgeLength, uniqueEdgeLength);
+
             std::ostringstream oss;
             if (mBenchmarkFolderActive)
             {
                 std::string fileName = std::filesystem::path(mFolderFiles[mCurrentFolderFile]).filename().string();
                 oss << fileName << "," << methodName << "," << mCpuTimeMs << "," 
-                    << median << "," << mean << "," << stddev << "," << helperCount;
+                    << median << "," << mean << "," << stddev << ","
+                    << helperCount << "," << uniqueEdgeLength;
             }
             else
             {
                 oss << methodName << "," << mCpuTimeMs << "," << median << "," 
-                    << mean << "," << stddev << "," << helperCount;
+                    << mean << "," << stddev << "," << helperCount << "," << uniqueEdgeLength;
             }
             std::string logLine = oss.str();
 
@@ -492,6 +505,36 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
     }
 }
 
+void HelperLaneViz::processBenchmarkFolderStep(RenderContext* pRenderContext)
+{
+    if (mCurrentFolderFile < (int)mFolderFiles.size())
+    {
+        processBenchmarkStep(pRenderContext);
+
+        if (mCurrentMethod >= (int)mBenchmarkMethods.size())
+        {
+            mCurrentFolderFile++;
+            if (mCurrentFolderFile < (int)mFolderFiles.size())
+            {
+                mSvgPath = mFolderFiles[mCurrentFolderFile];
+                mCurrentMethod = 0;
+                mBenchmarkStep = 0;
+                mWaitFrameCounter = 0;
+                mGpuFrameCounter = 0;
+            }
+            else
+            {
+                mBenchmarkFolderActive = false;
+                if (mBenchmarkFile.is_open())
+                {
+                    mBenchmarkFile.flush();
+                    mBenchmarkFile.close();
+                }
+                mBenchmarkLog.push_back("Folder benchmark complete!");
+            }
+        }
+    }
+}
 void HelperLaneViz::onShutdown() {}
 void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 {
@@ -507,33 +550,7 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 {
     if (mBenchmarkFolderActive)
     {
-        if (mCurrentFolderFile < (int)mFolderFiles.size())
-        {
-            processBenchmarkStep(pRenderContext);
-            
-            if (mCurrentMethod >= (int)mBenchmarkMethods.size())
-            {
-                mCurrentFolderFile++;
-                if (mCurrentFolderFile < (int)mFolderFiles.size())
-                {
-                    mSvgPath = mFolderFiles[mCurrentFolderFile];
-                    mCurrentMethod = 0;
-                    mBenchmarkStep = 0;
-                    mWaitFrameCounter = 0;
-                    mGpuFrameCounter = 0;
-                }
-                else
-                {
-                    mBenchmarkFolderActive = false;
-                    if (mBenchmarkFile.is_open())
-                    {
-                        mBenchmarkFile.flush();
-                        mBenchmarkFile.close();
-                    }
-                    mBenchmarkLog.push_back("Folder benchmark complete!");
-                }
-            }
-        }
+        processBenchmarkFolderStep(pRenderContext);
     }
     else if (mBenchmarkActive)
     {
@@ -722,7 +739,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
         mBenchmarkFile.open("C:/Users/User/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
-            mBenchmarkFile << "Method  CPU_Time_ms  GPU_Median_ms   GPU_Mean_ms GPU_StdDev_ms   HelperLaneCount\n";
+            mBenchmarkFile << "Method  CPU_Time_ms  GPU_Median_ms   GPU_Mean_ms GPU_StdDev_ms   HelperLaneCount EdgeLength\n";
     }
 
     if (w.button("Benchmark Folder"))

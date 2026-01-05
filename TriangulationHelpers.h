@@ -11,9 +11,6 @@ using namespace Falcor;
 namespace Triangulation
 {
 
-// Calculate total edge length of a triangulation (sum of all triangle perimeters)
-double calculateTotalEdgeLength(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
-
 // MARK: - Polygon Triangulation Methods
 
 // Simple ear clipping triangulation - O(n²), works for any simple polygon.
@@ -63,7 +60,11 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
 // Create vertices for an ellipse
 std::vector<Vertex> CreateVerticesForEllipse(uint32_t numSegments, float radiusX, float radiusY, const float2& center);
 
-// Create convex minimum weight triangulation (wrapper for minimumWeightTriangulation)
-std::vector<uint32_t> CreateConvexMWT(const std::vector<Vertex>& vertices, double& outEdgeLength);
+void ComputeEdgeMetrics(
+    const std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices,
+    size_t& outUniqueEdgeCount,
+    double& outTotalEdgeLength
+);
 
 } // namespace Triangulation

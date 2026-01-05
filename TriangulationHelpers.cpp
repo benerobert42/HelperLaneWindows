@@ -503,18 +503,6 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices)
 
 } // anonymous namespace
 
-// MARK: - Edge Length Calculation
-
-double calculateTotalEdgeLength(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
-{
-    double total = 0.0;
-    for (size_t i = 0; i < indices.size(); i += 3)
-    {
-        total += trianglePerimeter(vertices, indices[i], indices[i + 1], indices[i + 2]);
-    }
-    return total;
-}
-
 // MARK: - Triangulation Implementations
 
 std::vector<uint32_t> earClippingTriangulation(const std::vector<Vertex>& vertices)
@@ -1299,6 +1287,7 @@ struct EdgeKey
     uint32_t a;
     uint32_t b;
     bool operator==(const EdgeKey& o) const { return a == o.a && b == o.b; }
+    uint64_t GetHash() const { return (uint64_t(a) << 32) | uint64_t(b); }
 };
 
 struct EdgeKeyHash
@@ -1321,6 +1310,10 @@ struct EdgeAdj
 
 inline EdgeKey makeKey(uint32_t u, uint32_t v)
 {
+    if (u > v)
+    {
+        std::swap(u, v);
+    }
     return EdgeKey{std::min(u, v), std::max(u, v)};
 }
 
@@ -1653,11 +1646,50 @@ std::vector<Vertex> CreateVerticesForEllipse(uint32_t numSegments, float radiusX
     return vertices;
 }
 
-std::vector<uint32_t> CreateConvexMWT(const std::vector<Vertex>& vertices, double& outEdgeLength)
+// MARK: - Edge Length Calculation
+
+void ComputeEdgeMetrics(
+    const std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices,
+    size_t& outUniqueEdgeCount,
+    double& outTotalEdgeLength
+)
 {
-    std::vector<uint32_t> indices = minimumWeightTriangulation(vertices, false);
-    outEdgeLength = calculateTotalEdgeLength(vertices, indices);
-    return indices;
+    std::unordered_set<uint64_t> uniqueEdges;
+    uniqueEdges.reserve(indices.size());
+
+    const size_t triangleCount = indices.size() / 3;
+
+    for (size_t triangleIndex = 0; triangleIndex < triangleCount; ++triangleIndex)
+    {
+        const size_t baseIndex = triangleIndex * 3;
+        const uint32_t vertexIndex0 = indices[baseIndex + 0];
+        const uint32_t vertexIndex1 = indices[baseIndex + 1];
+        const uint32_t vertexIndex2 = indices[baseIndex + 2];
+
+        uniqueEdges.insert(makeKey(vertexIndex0, vertexIndex1).GetHash());
+        uniqueEdges.insert(makeKey(vertexIndex1, vertexIndex2).GetHash());
+        uniqueEdges.insert(makeKey(vertexIndex2, vertexIndex0).GetHash());
+    }
+
+    double totalLength = 0.0;
+
+    for (uint64_t edgeKey : uniqueEdges)
+    {
+        const uint32_t indexA = static_cast<uint32_t>(edgeKey >> 32);
+        const uint32_t indexB = static_cast<uint32_t>(edgeKey & 0xFFFFFFFFu);
+
+        const auto& positionA = vertices[indexA].pos;
+        const auto& positionB = vertices[indexB].pos;
+
+        const double deltaX = static_cast<double>(positionB.x) - static_cast<double>(positionA.x);
+        const double deltaY = static_cast<double>(positionB.y) - static_cast<double>(positionA.y);
+
+        totalLength += std::sqrt(deltaX * deltaX + deltaY * deltaY);
+    }
+
+    outUniqueEdgeCount = uniqueEdges.size();
+    outTotalEdgeLength = totalLength;
 }
 
 } // namespace Triangulation

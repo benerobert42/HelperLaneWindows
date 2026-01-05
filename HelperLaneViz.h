@@ -136,5 +136,6 @@ private:
     void updateGridParams();
 
     void processBenchmarkStep(RenderContext* pRenderContext);
+    void processBenchmarkFolderStep(RenderContext* pRenderContext);
     void benchmarkFolder(const std::string& folderPath);
 };
