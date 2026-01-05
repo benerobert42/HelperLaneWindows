@@ -739,7 +739,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
         mBenchmarkFile.open("C:/Users/User/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
-            mBenchmarkFile << "Method  CPU_Time_ms  GPU_Median_ms   GPU_Mean_ms GPU_StdDev_ms   HelperLaneCount EdgeLength\n";
+            mBenchmarkFile << "Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
     }
 
     if (w.button("Benchmark Folder"))
