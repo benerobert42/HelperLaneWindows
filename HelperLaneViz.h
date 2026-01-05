@@ -122,8 +122,13 @@ private:
     int mGpuFrameCounter = 0;
     double mCpuTimeMs = 0.0;
     std::vector<float> mGpuTimes;
-    std::vector<std::string> mBenchmarkLog; // stores strings to print in ImGui
-    std::ofstream mBenchmarkFile;           // CSV file
+    std::vector<std::string> mBenchmarkLog;
+    std::ofstream mBenchmarkFile;
+
+    bool mBenchmarkFolderActive = false;
+    std::vector<std::string> mFolderFiles;
+    int mCurrentFolderFile = 0;
+    std::string mBenchmarkOutputPath;
 
     void uploadGeometry();
     void loadSvg(const std::string& path);
@@ -131,4 +136,5 @@ private:
     void updateGridParams();
 
     void processBenchmarkStep(RenderContext* pRenderContext);
+    void benchmarkFolder(const std::string& folderPath);
 };

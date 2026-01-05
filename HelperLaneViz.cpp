@@ -34,6 +34,10 @@
 #include "Core/Program/ProgramManager.h"
 
 #include <chrono>
+#include <filesystem>
+#include <windows.h>
+#include <shlobj.h>
+#include <sstream>
 
 using namespace Falcor;
 
@@ -290,6 +294,64 @@ void HelperLaneViz::updateGridParams()
     mpVars->getRootVar()["Grid"].setBlob(gridParams);
 }
 
+std::string selectFolder()
+{
+    std::string folderPath;
+    BROWSEINFOA bi = {0};
+    bi.lpszTitle = "Select folder to benchmark";
+    LPITEMIDLIST pidl = SHBrowseForFolderA(&bi);
+    if (pidl != nullptr)
+    {
+        char path[MAX_PATH];
+        if (SHGetPathFromIDListA(pidl, path))
+        {
+            folderPath = path;
+        }
+        CoTaskMemFree(pidl);
+    }
+    return folderPath;
+}
+
+void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
+{
+    if (folderPath.empty())
+        return;
+
+    mFolderFiles.clear();
+    for (const auto& entry : std::filesystem::directory_iterator(folderPath))
+    {
+        if (entry.is_regular_file())
+        {
+            std::string filePath = entry.path().string();
+            std::string ext = filePath.substr(filePath.find_last_of(".") + 1);
+            if (ext == "svg")
+            {
+                mFolderFiles.push_back(filePath);
+            }
+        }
+    }
+
+    if (mFolderFiles.empty())
+        return;
+
+    mBenchmarkOutputPath = folderPath + "/benchmark_results.txt";
+    mBenchmarkFile.open(mBenchmarkOutputPath, std::ios::out | std::ios::trunc);
+    if (!mBenchmarkFile.is_open())
+        return;
+
+    mBenchmarkFile << "File,Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount\n";
+
+    mBenchmarkFolderActive = true;
+    mCurrentFolderFile = 0;
+    mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
+    mCurrentMethod = 0;
+    mBenchmarkStep = 0;
+    mWaitFrameCounter = 0;
+    mGpuFrameCounter = 0;
+    mUseCircle = false;
+    mSvgPath = mFolderFiles[0];
+}
+
 void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
 {
     const std::unordered_map<int, std::string> kTriangulationMethodNames = {
@@ -381,36 +443,48 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
             mReadBackHelperLaneCount = false;
             mpProgram->removeDefine("READ_BACK_HELPER_LANE_COUNT");
 
-            // Format CSV line with method name
             std::ostringstream oss;
-            oss << methodName << "," // Method name
-                << mCpuTimeMs << "," // CPU Time
-                << median << ","     // GPU Median
-                << mean << ","       // GPU Mean
-                << stddev << ","     // GPU StdDev
-                << helperCount;      // Helper Lane Count
+            if (mBenchmarkFolderActive)
+            {
+                std::string fileName = std::filesystem::path(mFolderFiles[mCurrentFolderFile]).filename().string();
+                oss << fileName << "," << methodName << "," << mCpuTimeMs << "," 
+                    << median << "," << mean << "," << stddev << "," << helperCount;
+            }
+            else
+            {
+                oss << methodName << "," << mCpuTimeMs << "," << median << "," 
+                    << mean << "," << stddev << "," << helperCount;
+            }
             std::string logLine = oss.str();
 
-            // ImGui log
             mBenchmarkLog.push_back(logLine);
 
-            // Write to file
             if (mBenchmarkFile.is_open())
+            {
                 mBenchmarkFile << logLine << "\n";
+                mBenchmarkFile.flush();
+            }
 
             // Move to next method
             mCurrentMethod++;
             if (mCurrentMethod >= (int)mBenchmarkMethods.size())
             {
-                mBenchmarkActive = false;
-                mBenchmarkStep = 0;
-                if (mBenchmarkFile.is_open())
-                    mBenchmarkFile.close();
-                mBenchmarkLog.push_back("Benchmark complete!");
+                if (mBenchmarkFolderActive)
+                {
+                    mBenchmarkStep = 0;
+                }
+                else
+                {
+                    mBenchmarkActive = false;
+                    mBenchmarkStep = 0;
+                    if (mBenchmarkFile.is_open())
+                        mBenchmarkFile.close();
+                    mBenchmarkLog.push_back("Benchmark complete!");
+                }
             }
             else
             {
-                mBenchmarkStep = 0; // Next method
+                mBenchmarkStep = 0;
             }
         }
         break;
@@ -431,7 +505,37 @@ void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 
 void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
-    if (mBenchmarkActive)
+    if (mBenchmarkFolderActive)
+    {
+        if (mCurrentFolderFile < (int)mFolderFiles.size())
+        {
+            processBenchmarkStep(pRenderContext);
+            
+            if (mCurrentMethod >= (int)mBenchmarkMethods.size())
+            {
+                mCurrentFolderFile++;
+                if (mCurrentFolderFile < (int)mFolderFiles.size())
+                {
+                    mSvgPath = mFolderFiles[mCurrentFolderFile];
+                    mCurrentMethod = 0;
+                    mBenchmarkStep = 0;
+                    mWaitFrameCounter = 0;
+                    mGpuFrameCounter = 0;
+                }
+                else
+                {
+                    mBenchmarkFolderActive = false;
+                    if (mBenchmarkFile.is_open())
+                    {
+                        mBenchmarkFile.flush();
+                        mBenchmarkFile.close();
+                    }
+                    mBenchmarkLog.push_back("Folder benchmark complete!");
+                }
+            }
+        }
+    }
+    else if (mBenchmarkActive)
     {
         processBenchmarkStep(pRenderContext);
     }
@@ -613,13 +717,21 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         mCurrentMethod = 0;
         mWaitFrameCounter = 0;
         mGpuFrameCounter = 0;
-        mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}; // skip centroid fan
+        mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
         mBenchmarkLog.clear();
 
-        // Open CSV file
         mBenchmarkFile.open("C:/Users/User/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
             mBenchmarkFile << "Method  CPU_Time_ms  GPU_Median_ms   GPU_Mean_ms GPU_StdDev_ms   HelperLaneCount\n";
+    }
+
+    if (w.button("Benchmark Folder"))
+    {
+        std::string folderPath = selectFolder();
+        if (!folderPath.empty())
+        {
+            benchmarkFolder(folderPath);
+        }
     }
 }
 
