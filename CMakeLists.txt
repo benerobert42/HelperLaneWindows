@@ -46,3 +46,11 @@ target_sources(HelperLaneWindows PRIVATE ${SHADER_FILES})
 target_copy_shaders(HelperLaneWindows Samples/HelperLaneWindows)
 
 target_source_group(HelperLaneWindows "Samples")
+
+# Enable AVX2 on supported MSVC x64 targets, to enable compiler vectorizations. 
+target_compile_options(HelperLaneWindows PRIVATE
+  # Windows, x64 MSVC frontend (covers cl.exe and clang-cl) and not ARM
+  $<$<AND:$<PLATFORM_ID:Windows>,$<CXX_COMPILER_ID:MSVC>,$<STREQUAL:${MSVC_CXX_ARCHITECTURE_ID},x64>>:/arch:AVX2>
+  $<$<AND:$<NOT:$<PLATFORM_ID:Windows>>,$<CXX_COMPILER_ID:GNU>>:-mavx2 -mfma>
+  $<$<AND:$<NOT:$<PLATFORM_ID:Windows>>,$<CXX_COMPILER_ID:Clang>>:-mavx2 -mfma>
+)
