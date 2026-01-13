@@ -39,6 +39,9 @@
 #include <shlobj.h>
 #include <sstream>
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "ThirdParty/earcut.hpp/vendor/glfw/deps/stb_image_write.h"
+
 using namespace Falcor;
 
 FALCOR_EXPORT_D3D12_AGILITY_SDK
@@ -603,6 +606,145 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
         pRenderContext->resolveResource(mpFbo->getColorTexture(0), mpResolvedTexture);
         pRenderContext->blit(mpResolvedTexture->getSRV(), pTargetFbo->getRenderTargetView(0));
     }
+    
+    // Save screenshot if requested (before ImGui is rendered)
+    if (mRequestScreenshot)
+    {
+        saveScreenshot(pRenderContext, pTargetFbo);
+        mRequestScreenshot = false;
+    }
+}
+
+// Helper function to convert float16 (stored as uint16) to float
+static float float16ToFloat(uint16_t halfVal)
+{
+    // IEEE 754 half-precision float format:
+    // Sign: 1 bit, Exponent: 5 bits, Mantissa: 10 bits
+    uint32_t sign = (halfVal & 0x8000) << 16;
+    uint32_t exp = (halfVal & 0x7C00) >> 10;
+    uint32_t mantissa = halfVal & 0x03FF;
+    
+    if (exp == 0)
+    {
+        // Zero or denormal
+        if (mantissa == 0)
+        {
+            return sign ? -0.0f : 0.0f;
+        }
+        // Denormal: convert to normalized float
+        // Denormals use implicit leading 0 instead of 1
+        // Value = mantissa * 2^(-14) * 2^(-10) = mantissa * 2^(-24)
+        float val = static_cast<float>(mantissa) * (1.0f / 16777216.0f); // 2^-24
+        return sign ? -val : val;
+    }
+    else if (exp == 31)
+    {
+        // Infinity or NaN
+        if (mantissa == 0)
+        {
+            return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
+        }
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+    else
+    {
+        // Normal number
+        // Float32: sign(1) + exp(8) + mantissa(23)
+        // Float16: sign(1) + exp(5) + mantissa(10)
+        // Convert: exp16 - 15 + 127 = exp32
+        uint32_t exp32 = (exp - 15 + 127) << 23;
+        uint32_t mantissa32 = mantissa << 13; // Shift left by (23-10) = 13
+        uint32_t bits = sign | exp32 | mantissa32;
+        return *reinterpret_cast<float*>(&bits);
+    }
+}
+
+void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
+{
+    // Get the render target texture (without ImGui overlay)
+    ref<Texture> renderTexture;
+    if (cntMSAA > 1)
+    {
+        // Use the resolved texture if MSAA is enabled
+        renderTexture = mpResolvedTexture;
+    }
+    else
+    {
+        // Use the target FBO texture directly
+        renderTexture = pTargetFbo->getColorTexture(0);
+    }
+    
+    if (!renderTexture)
+    {
+        return;
+    }
+    
+    // Get texture dimensions
+    uint32_t width = renderTexture->getWidth();
+    uint32_t height = renderTexture->getHeight();
+    
+    // Read texture data (RGBA16Float format)
+    std::vector<uint8_t> textureData = pRenderContext->readTextureSubresource(renderTexture.get(), 0);
+    
+    // Convert from RGBA16Float to RGBA8Unorm
+    // RGBA16Float has 2 bytes per channel, so 8 bytes per pixel
+    // RGBA8Unorm has 1 byte per channel, so 4 bytes per pixel
+    size_t pixelCount = width * height;
+    std::vector<uint8_t> rgba8Data(pixelCount * 4);
+    
+    const uint16_t* srcData = reinterpret_cast<const uint16_t*>(textureData.data());
+    for (size_t i = 0; i < pixelCount; ++i)
+    {
+        // Convert each float16 channel to uint8 with proper float16 decoding
+        size_t srcIdx = i * 4; // 4 channels (RGBA), each 2 bytes
+        
+        // Convert float16 to float, then to uint8 with proper tone mapping
+        auto convertHalfToUint8 = [](uint16_t halfVal) -> uint8_t {
+            float val = float16ToFloat(halfVal);
+            // Clamp to [0, 1] range and convert to uint8
+            // For HDR values > 1.0, we use simple clamping (you might want tone mapping for HDR)
+            val = std::max(0.0f, std::min(1.0f, val));
+            return static_cast<uint8_t>(val * 255.0f + 0.5f);
+        };
+        
+        rgba8Data[i * 4 + 0] = convertHalfToUint8(srcData[srcIdx + 0]); // R
+        rgba8Data[i * 4 + 1] = convertHalfToUint8(srcData[srcIdx + 1]); // G
+        rgba8Data[i * 4 + 2] = convertHalfToUint8(srcData[srcIdx + 2]); // B
+        rgba8Data[i * 4 + 3] = convertHalfToUint8(srcData[srcIdx + 3]); // A
+    }
+    
+    // Flip vertically (OpenGL/D3D coordinate system difference)
+    std::vector<uint8_t> flippedData(pixelCount * 4);
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        uint32_t srcRow = height - 1 - y;
+        memcpy(&flippedData[y * width * 4], &rgba8Data[srcRow * width * 4], width * 4);
+    }
+    
+    // Generate filename with timestamp
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm tm;
+    localtime_s(&tm, &time);
+    
+    // Save to Users/ShaprIntel/Downloads folder
+    std::string downloadsPath = "C:/Users/ShaprIntel/Downloads";
+    std::filesystem::create_directories(downloadsPath); // Ensure directory exists
+    
+    char filename[256];
+    snprintf(filename, sizeof(filename), "%s/screenshot_%04d%02d%02d_%02d%02d%02d.png",
+        downloadsPath.c_str(),
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+        tm.tm_hour, tm.tm_min, tm.tm_sec);
+    
+    // Save as PNG using stb_image_write (lossless format for pixel precision)
+    int stride = width * 4;
+    int result = stbi_write_png(filename, width, height, 4, flippedData.data(), stride);
+    
+    if (result)
+    {
+        // Success - could log this if needed
+    }
 }
 
 void HelperLaneViz::onGuiRender(Gui* pGui)
@@ -750,6 +892,22 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             benchmarkFolder(folderPath);
         }
     }
+    
+    w.separator();
+    if (w.button("Save Screenshot"))
+    {
+        mRequestScreenshot = true;
+    }
+    
+    w.separator();
+    w.text("Window Size");
+    bool windowSizeChanged = false;
+    windowSizeChanged |= w.var("Width", mDesiredWindowWidth, 100u, 7680u);
+    windowSizeChanged |= w.var("Height", mDesiredWindowHeight, 100u, 4320u);
+    if (w.button("Set Window Size"))
+    {
+        resizeWindow(mDesiredWindowWidth, mDesiredWindowHeight);
+    }
 }
 
 bool HelperLaneViz::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -761,6 +919,52 @@ bool HelperLaneViz::onMouseEvent(const MouseEvent& mouseEvent)
     return false;
 }
 void HelperLaneViz::onHotReload(HotReloadFlags reloaded) {}
+
+void HelperLaneViz::resizeWindow(uint32_t width, uint32_t height)
+{
+    // Use Windows API to find and resize our window by title
+    #ifdef _WIN32
+    HWND hwnd = FindWindowA(NULL, "Falcor Project Template");
+    if (!hwnd)
+    {
+        // Try alternative: find window by class name (GLFW uses "GLFW30" as default class name)
+        hwnd = FindWindowA("GLFW30", NULL);
+    }
+    
+    if (!hwnd)
+    {
+        // Last resort: use foreground window (might not be our window, but better than nothing)
+        hwnd = GetForegroundWindow();
+    }
+    
+    if (hwnd)
+    {
+        // Get current window position to maintain it
+        RECT rect;
+        GetWindowRect(hwnd, &rect);
+        int x = rect.left;
+        int y = rect.top;
+        
+        // Resize using Windows API
+        // Note: SetWindowPos uses client area size, so we need to account for window frame
+        // For simplicity, we'll use MoveWindow which works with client area
+        RECT clientRect;
+        GetClientRect(hwnd, &clientRect);
+        int currentClientWidth = clientRect.right - clientRect.left;
+        int currentClientHeight = clientRect.bottom - clientRect.top;
+        
+        // Calculate the difference between window size and client size (frame size)
+        int frameWidth = (rect.right - rect.left) - currentClientWidth;
+        int frameHeight = (rect.bottom - rect.top) - currentClientHeight;
+        
+        // Resize window (including frame) to achieve desired client size
+        SetWindowPos(hwnd, NULL, x, y, 
+                    static_cast<int>(width) + frameWidth, 
+                    static_cast<int>(height) + frameHeight, 
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    #endif
+}
 
 int runMain(int argc, char** argv)
 {

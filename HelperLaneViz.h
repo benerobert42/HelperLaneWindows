@@ -138,4 +138,13 @@ private:
     void processBenchmarkStep(RenderContext* pRenderContext);
     void processBenchmarkFolderStep(RenderContext* pRenderContext);
     void benchmarkFolder(const std::string& folderPath);
+    
+    // Screenshot functionality
+    void saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo);
+    bool mRequestScreenshot = false;
+    
+    // Window resize functionality
+    void resizeWindow(uint32_t width, uint32_t height);
+    uint32_t mDesiredWindowWidth = 1920;
+    uint32_t mDesiredWindowHeight = 1080;
 };
