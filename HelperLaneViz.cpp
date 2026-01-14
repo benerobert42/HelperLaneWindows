@@ -67,7 +67,8 @@ void HelperLaneViz::CreateMSAATargets()
 {
     mpFbo = Fbo::create(getDevice());
     ref<Texture> tex = getDevice()->createTexture2DMS(
-        getTargetFbo()->getWidth(), getTargetFbo()->getHeight(),
+        getTargetFbo()->getWidth(),
+        getTargetFbo()->getHeight(),
         ResourceFormat::RGBA16Float,
         cntMSAA,
         1,
@@ -75,12 +76,8 @@ void HelperLaneViz::CreateMSAATargets()
     );
     mpFbo->attachColorTarget(tex, 0);
 
-    mpResolvedTexture = getDevice()->createTexture2D(
-        getTargetFbo()->getWidth(),
-        getTargetFbo()->getHeight(),
-        ResourceFormat::RGBA16Float,
-        1,
-        1);
+    mpResolvedTexture =
+        getDevice()->createTexture2D(getTargetFbo()->getWidth(), getTargetFbo()->getHeight(), ResourceFormat::RGBA16Float, 1, 1);
 }
 
 void HelperLaneViz::onLoad(RenderContext* pRenderContext)
@@ -119,13 +116,7 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     updateGridParams();
 
     mpHelperLaneCounter = getDevice()->createTexture2D(
-        1,
-        1,
-        ResourceFormat::R32Uint,
-        1,
-        1,
-        nullptr,
-        ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        1, 1, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
     mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
 
@@ -133,13 +124,7 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     uint32_t texHeight = 2048;
     std::vector<uint32_t> pixels(texWidth * texHeight, 0xFF0000FF); // ARGB: A=255, R=0, G=0, B=255
     mpDummyTexture = getDevice()->createTexture2D(
-        texWidth,
-        texHeight,
-        ResourceFormat::RGBA8Unorm,
-        1,
-        1,
-        pixels.data(),
-        ResourceBindFlags::ShaderResource
+        texWidth, texHeight, ResourceFormat::RGBA8Unorm, 1, 1, pixels.data(), ResourceBindFlags::ShaderResource
     );
 
     // MSAA render target
@@ -356,6 +341,7 @@ void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
     mWaitFrameCounter = 0;
     mGpuFrameCounter = 0;
     mUseCircle = false;
+    mSyntheticShapePhase = 0; // Start with SVG files
     mSvgPath = mFolderFiles[0];
 }
 
@@ -372,8 +358,7 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
         {7, "CDT"},
         {8, "Earcut (Mapbox)"},
         {9, "Earcut + Flip"},
-        {10, "CDT + Flip"}
-    };
+        {10, "CDT + Flip"}};
     Profiler* pProfiler = getDevice()->getProfiler();
     if (pProfiler)
         pProfiler->setEnabled(true);
@@ -433,7 +418,7 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
         }
 
         mGpuFrameCounter++;
-        if (mGpuFrameCounter == gpuFrames )
+        if (mGpuFrameCounter == gpuFrames)
         {
             mReadBackHelperLaneCount = true;
             mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
@@ -461,15 +446,26 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
             std::ostringstream oss;
             if (mBenchmarkFolderActive)
             {
-                std::string fileName = std::filesystem::path(mFolderFiles[mCurrentFolderFile]).filename().string();
-                oss << fileName << "," << methodName << "," << mCpuTimeMs << "," 
-                    << median << "," << mean << "," << stddev << ","
+                std::string fileName;
+                if (mSyntheticShapePhase == 1)
+                {
+                    fileName = "circle_512";
+                }
+                else if (mSyntheticShapePhase == 2)
+                {
+                    fileName = "ellipse_512";
+                }
+                else
+                {
+                    fileName = std::filesystem::path(mFolderFiles[mCurrentFolderFile]).filename().string();
+                }
+                oss << fileName << "," << methodName << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << ","
                     << helperCount << "," << uniqueEdgeLength;
             }
             else
             {
-                oss << methodName << "," << mCpuTimeMs << "," << median << "," 
-                    << mean << "," << stddev << "," << helperCount << "," << uniqueEdgeLength;
+                oss << methodName << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << "," << helperCount << ","
+                    << uniqueEdgeLength;
             }
             std::string logLine = oss.str();
 
@@ -510,23 +506,56 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
 
 void HelperLaneViz::processBenchmarkFolderStep(RenderContext* pRenderContext)
 {
-    if (mCurrentFolderFile < (int)mFolderFiles.size())
+    // Process SVG files or synthetic shapes
+    if (mCurrentFolderFile < (int)mFolderFiles.size() || mSyntheticShapePhase > 0)
     {
         processBenchmarkStep(pRenderContext);
 
         if (mCurrentMethod >= (int)mBenchmarkMethods.size())
         {
-            mCurrentFolderFile++;
             if (mCurrentFolderFile < (int)mFolderFiles.size())
             {
-                mSvgPath = mFolderFiles[mCurrentFolderFile];
+                // Move to next SVG file
+                mCurrentFolderFile++;
+                if (mCurrentFolderFile < (int)mFolderFiles.size())
+                {
+                    mSvgPath = mFolderFiles[mCurrentFolderFile];
+                    mCurrentMethod = 0;
+                    mBenchmarkStep = 0;
+                    mWaitFrameCounter = 0;
+                    mGpuFrameCounter = 0;
+                }
+                else
+                {
+                    // All SVG files done, move to synthetic shapes
+                    mSyntheticShapePhase = 1;
+                    mUseCircle = true;
+                    mCircleVertexCount = 512;
+                    // Use default radius (will be set to same for circle)
+                    mEllipseRadiusX = 0.4f;
+                    mEllipseRadiusY = 0.4f;
+                    mCurrentMethod = 0;
+                    mBenchmarkStep = 0;
+                    mWaitFrameCounter = 0;
+                    mGpuFrameCounter = 0;
+                }
+            }
+            else if (mSyntheticShapePhase == 1)
+            {
+                // Circle done, move to ellipse
+                mSyntheticShapePhase = 2;
+                mUseCircle = true;
+                mCircleVertexCount = 512;
+                mEllipseRadiusX = 0.4f;
+                mEllipseRadiusY = 0.2f; // 0.5x the x axis
                 mCurrentMethod = 0;
                 mBenchmarkStep = 0;
                 mWaitFrameCounter = 0;
                 mGpuFrameCounter = 0;
             }
-            else
+            else if (mSyntheticShapePhase == 2)
             {
+                // All done (circle and ellipse completed)
                 mBenchmarkFolderActive = false;
                 if (mBenchmarkFile.is_open())
                 {
@@ -534,6 +563,8 @@ void HelperLaneViz::processBenchmarkFolderStep(RenderContext* pRenderContext)
                     mBenchmarkFile.close();
                 }
                 mBenchmarkLog.push_back("Folder benchmark complete!");
+                mSyntheticShapePhase = 0;
+                mUseCircle = false;
             }
         }
     }
@@ -588,7 +619,6 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
         mpState->setRasterizerState(defaultRsState);
     }
 
-
     if (mIndexCount)
     {
         uint32_t instanceCount = mGridCols * mGridRows;
@@ -606,7 +636,7 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
         pRenderContext->resolveResource(mpFbo->getColorTexture(0), mpResolvedTexture);
         pRenderContext->blit(mpResolvedTexture->getSRV(), pTargetFbo->getRenderTargetView(0));
     }
-    
+
     // Save screenshot if requested (before ImGui is rendered)
     if (mRequestScreenshot)
     {
@@ -623,7 +653,7 @@ static float float16ToFloat(uint16_t halfVal)
     uint32_t sign = (halfVal & 0x8000) << 16;
     uint32_t exp = (halfVal & 0x7C00) >> 10;
     uint32_t mantissa = halfVal & 0x03FF;
-    
+
     if (exp == 0)
     {
         // Zero or denormal
@@ -673,46 +703,47 @@ void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>
         // Use the target FBO texture directly
         renderTexture = pTargetFbo->getColorTexture(0);
     }
-    
+
     if (!renderTexture)
     {
         return;
     }
-    
+
     // Get texture dimensions
     uint32_t width = renderTexture->getWidth();
     uint32_t height = renderTexture->getHeight();
-    
+
     // Read texture data (RGBA16Float format)
     std::vector<uint8_t> textureData = pRenderContext->readTextureSubresource(renderTexture.get(), 0);
-    
+
     // Convert from RGBA16Float to RGBA8Unorm
     // RGBA16Float has 2 bytes per channel, so 8 bytes per pixel
     // RGBA8Unorm has 1 byte per channel, so 4 bytes per pixel
     size_t pixelCount = width * height;
     std::vector<uint8_t> rgba8Data(pixelCount * 4);
-    
+
     const uint16_t* srcData = reinterpret_cast<const uint16_t*>(textureData.data());
     for (size_t i = 0; i < pixelCount; ++i)
     {
         // Convert each float16 channel to uint8 with proper float16 decoding
         size_t srcIdx = i * 4; // 4 channels (RGBA), each 2 bytes
-        
+
         // Convert float16 to float, then to uint8 with proper tone mapping
-        auto convertHalfToUint8 = [](uint16_t halfVal) -> uint8_t {
+        auto convertHalfToUint8 = [](uint16_t halfVal) -> uint8_t
+        {
             float val = float16ToFloat(halfVal);
             // Clamp to [0, 1] range and convert to uint8
             // For HDR values > 1.0, we use simple clamping (you might want tone mapping for HDR)
             val = std::max(0.0f, std::min(1.0f, val));
             return static_cast<uint8_t>(val * 255.0f + 0.5f);
         };
-        
+
         rgba8Data[i * 4 + 0] = convertHalfToUint8(srcData[srcIdx + 0]); // R
         rgba8Data[i * 4 + 1] = convertHalfToUint8(srcData[srcIdx + 1]); // G
         rgba8Data[i * 4 + 2] = convertHalfToUint8(srcData[srcIdx + 2]); // B
         rgba8Data[i * 4 + 3] = convertHalfToUint8(srcData[srcIdx + 3]); // A
     }
-    
+
     // Flip vertically (OpenGL/D3D coordinate system difference)
     std::vector<uint8_t> flippedData(pixelCount * 4);
     for (uint32_t y = 0; y < height; ++y)
@@ -720,27 +751,35 @@ void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>
         uint32_t srcRow = height - 1 - y;
         memcpy(&flippedData[y * width * 4], &rgba8Data[srcRow * width * 4], width * 4);
     }
-    
+
     // Generate filename with timestamp
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
     std::tm tm;
     localtime_s(&tm, &time);
-    
+
     // Save to Users/ShaprIntel/Downloads folder
     std::string downloadsPath = "C:/Users/ShaprIntel/Downloads";
     std::filesystem::create_directories(downloadsPath); // Ensure directory exists
-    
+
     char filename[256];
-    snprintf(filename, sizeof(filename), "%s/screenshot_%04d%02d%02d_%02d%02d%02d.png",
+    snprintf(
+        filename,
+        sizeof(filename),
+        "%s/screenshot_%04d%02d%02d_%02d%02d%02d.png",
         downloadsPath.c_str(),
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec);
-    
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    );
+
     // Save as PNG using stb_image_write (lossless format for pixel precision)
     int stride = width * 4;
     int result = stbi_write_png(filename, width, height, 4, flippedData.data(), stride);
-    
+
     if (result)
     {
         // Success - could log this if needed
@@ -768,9 +807,10 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     }
 
     // MSAA
-    Gui::DropdownList msaaTypes = { {1, "None"}, { 2, "2x" }, {4, "4x"}, {8, "8x"}, {16, "16x"} };
+    Gui::DropdownList msaaTypes = {{1, "None"}, {2, "2x"}, {4, "4x"}, {8, "8x"}, {16, "16x"}};
     bool msaaChanged = w.dropdown("MSAA", msaaTypes, cntMSAA);
-    if (msaaChanged && cntMSAA > 1u) CreateMSAATargets();
+    if (msaaChanged && cntMSAA > 1u)
+        CreateMSAATargets();
 
     // Use built-in circle
     bool modeChanged = w.checkbox("Use Circle", mUseCircle);
@@ -797,8 +837,17 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
     // Triangulation type
     Gui::DropdownList triangTypes = {
-        {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"}, {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"},
-        {8, "Earcut (Mapbox)"}, {9, "Earcut + Flip"}, {10, "CDT + Flip"}};
+        {0, "Ear Clipping"},
+        {1, "MWT"},
+        {2, "Centroid Fan"},
+        {3, "Greedy"},
+        {4, "Strip"},
+        {5, "MaxMin"},
+        {6, "MinMax"},
+        {7, "CDT"},
+        {8, "Earcut (Mapbox)"},
+        {9, "Earcut + Flip"},
+        {10, "CDT + Flip"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
 
     w.separator();
@@ -838,7 +887,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     if (mUseCircle)
     {
         bool circleChanged = false;
-        circleChanged |= w.var("Vertex Count", mCircleVertexCount, 3u, 256u);
+        circleChanged |= w.var("Vertex Count", mCircleVertexCount, 3u, 1000u);
         circleChanged |= w.var("Radius X", mEllipseRadiusX, 0.01f, 0.5f);
         circleChanged |= w.var("Radius Y", mEllipseRadiusY, 0.01f, 0.5f);
         if (circleChanged || modeChanged || triangChanged)
@@ -879,7 +928,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
         mBenchmarkLog.clear();
 
-        mBenchmarkFile.open("C:/Users/User/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
+        mBenchmarkFile.open("C:/Users/ShaprIntel/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
             mBenchmarkFile << "Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
     }
@@ -892,13 +941,13 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             benchmarkFolder(folderPath);
         }
     }
-    
+
     w.separator();
     if (w.button("Save Screenshot"))
     {
         mRequestScreenshot = true;
     }
-    
+
     w.separator();
     w.text("Window Size");
     bool windowSizeChanged = false;
@@ -922,21 +971,21 @@ void HelperLaneViz::onHotReload(HotReloadFlags reloaded) {}
 
 void HelperLaneViz::resizeWindow(uint32_t width, uint32_t height)
 {
-    // Use Windows API to find and resize our window by title
-    #ifdef _WIN32
+// Use Windows API to find and resize our window by title
+#ifdef _WIN32
     HWND hwnd = FindWindowA(NULL, "Falcor Project Template");
     if (!hwnd)
     {
         // Try alternative: find window by class name (GLFW uses "GLFW30" as default class name)
         hwnd = FindWindowA("GLFW30", NULL);
     }
-    
+
     if (!hwnd)
     {
         // Last resort: use foreground window (might not be our window, but better than nothing)
         hwnd = GetForegroundWindow();
     }
-    
+
     if (hwnd)
     {
         // Get current window position to maintain it
@@ -944,7 +993,7 @@ void HelperLaneViz::resizeWindow(uint32_t width, uint32_t height)
         GetWindowRect(hwnd, &rect);
         int x = rect.left;
         int y = rect.top;
-        
+
         // Resize using Windows API
         // Note: SetWindowPos uses client area size, so we need to account for window frame
         // For simplicity, we'll use MoveWindow which works with client area
@@ -952,18 +1001,17 @@ void HelperLaneViz::resizeWindow(uint32_t width, uint32_t height)
         GetClientRect(hwnd, &clientRect);
         int currentClientWidth = clientRect.right - clientRect.left;
         int currentClientHeight = clientRect.bottom - clientRect.top;
-        
+
         // Calculate the difference between window size and client size (frame size)
         int frameWidth = (rect.right - rect.left) - currentClientWidth;
         int frameHeight = (rect.bottom - rect.top) - currentClientHeight;
-        
+
         // Resize window (including frame) to achieve desired client size
-        SetWindowPos(hwnd, NULL, x, y, 
-                    static_cast<int>(width) + frameWidth, 
-                    static_cast<int>(height) + frameHeight, 
-                    SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(
+            hwnd, NULL, x, y, static_cast<int>(width) + frameWidth, static_cast<int>(height) + frameHeight, SWP_NOZORDER | SWP_NOACTIVATE
+        );
     }
-    #endif
+#endif
 }
 
 int runMain(int argc, char** argv)
