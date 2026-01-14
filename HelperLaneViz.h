@@ -130,6 +130,9 @@ private:
     int mCurrentFolderFile = 0;
     std::string mBenchmarkOutputPath;
     int mSyntheticShapePhase = 0; // 0 = SVG files, 1 = circle, 2 = ellipse
+    int mBenchmarkConfigPhase = 0; // 0-3 for MSAA/Grid combinations
+    
+    void startBenchmarkConfig(int configPhase);
 
     void uploadGeometry();
     void loadSvg(const std::string& path);

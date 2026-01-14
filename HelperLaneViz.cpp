@@ -298,6 +298,67 @@ std::string selectFolder()
     return folderPath;
 }
 
+void HelperLaneViz::startBenchmarkConfig(int configPhase)
+{
+    mBenchmarkConfigPhase = configPhase;
+    
+    // Set MSAA and Grid based on config phase
+    // Config 0: MSAA=1, Grid=1x1
+    // Config 1: MSAA=1, Grid=10x10
+    // Config 2: MSAA=4, Grid=1x1
+    // Config 3: MSAA=4, Grid=10x10
+    switch (configPhase)
+    {
+    case 0:
+        cntMSAA = 1;
+        mGridCols = 1;
+        mGridRows = 1;
+        break;
+    case 1:
+        cntMSAA = 1;
+        mGridCols = 10;
+        mGridRows = 10;
+        break;
+    case 2:
+        cntMSAA = 4;
+        mGridCols = 1;
+        mGridRows = 1;
+        break;
+    case 3:
+        cntMSAA = 4;
+        mGridCols = 10;
+        mGridRows = 10;
+        break;
+    }
+    
+    // Apply settings
+    CreateMSAATargets();
+    updateGridParams();
+    
+    // Reset iteration state
+    mCurrentFolderFile = 0;
+    mSyntheticShapePhase = 0;
+    mCurrentMethod = 0;
+    mBenchmarkStep = 0;
+    mWaitFrameCounter = 0;
+    mGpuFrameCounter = 0;
+    mUseCircle = false;
+    
+    if (!mFolderFiles.empty())
+    {
+        mSvgPath = mFolderFiles[0];
+    }
+    
+    // Write config header to file
+    if (mBenchmarkFile.is_open())
+    {
+        std::string msaaStr = (cntMSAA == 1) ? "Off" : std::to_string(cntMSAA) + "x";
+        mBenchmarkFile << "\n";
+        mBenchmarkFile << "=== Configuration: MSAA " << msaaStr << ", Grid " << mGridCols << "x" << mGridRows << " ===\n";
+        mBenchmarkFile << "File,Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
+    }
+}
+
 void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
 {
     if (folderPath.empty())
@@ -331,18 +392,11 @@ void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
         return;
     }
 
-    mBenchmarkFile << "File,Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount\n";
-
     mBenchmarkFolderActive = true;
-    mCurrentFolderFile = 0;
     mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}; // Skip centroid fan
-    mCurrentMethod = 0;
-    mBenchmarkStep = 0;
-    mWaitFrameCounter = 0;
-    mGpuFrameCounter = 0;
-    mUseCircle = false;
-    mSyntheticShapePhase = 0; // Start with SVG files
-    mSvgPath = mFolderFiles[0];
+    
+    // Start with first configuration (MSAA Off, Grid 1x1)
+    startBenchmarkConfig(0);
 }
 
 void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
@@ -555,16 +609,26 @@ void HelperLaneViz::processBenchmarkFolderStep(RenderContext* pRenderContext)
             }
             else if (mSyntheticShapePhase == 2)
             {
-                // All done (circle and ellipse completed)
-                mBenchmarkFolderActive = false;
-                if (mBenchmarkFile.is_open())
+                // Ellipse done for current config, move to next config or finish
+                if (mBenchmarkConfigPhase < 3)
                 {
-                    mBenchmarkFile.flush();
-                    mBenchmarkFile.close();
+                    // Move to next configuration
+                    startBenchmarkConfig(mBenchmarkConfigPhase + 1);
                 }
-                mBenchmarkLog.push_back("Folder benchmark complete!");
-                mSyntheticShapePhase = 0;
-                mUseCircle = false;
+                else
+                {
+                    // All configurations done
+                    mBenchmarkFolderActive = false;
+                    if (mBenchmarkFile.is_open())
+                    {
+                        mBenchmarkFile.flush();
+                        mBenchmarkFile.close();
+                    }
+                    mBenchmarkLog.push_back("Folder benchmark complete!");
+                    mSyntheticShapePhase = 0;
+                    mBenchmarkConfigPhase = 0;
+                    mUseCircle = false;
+                }
             }
         }
     }
