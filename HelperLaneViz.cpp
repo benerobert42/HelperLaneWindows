@@ -523,11 +523,22 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
         mGpuFrameCounter++;
         if (mGpuFrameCounter == gpuFrames)
         {
+            // Save current VizMode and switch to HelperLanes for measurement
+            mSavedVizMode = mVizMode;
+            mVizMode = VizMode::HelperLanes;
+            mpProgram->removeDefine("VIZ_MODE");
+            mpProgram->addDefine("VIZ_MODE", "0");
+
             mReadBackHelperLaneCount = true;
             mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
         }
         if (mGpuFrameCounter > gpuFrames)
         {
+            // Restore original VizMode
+            mVizMode = mSavedVizMode;
+            mpProgram->removeDefine("VIZ_MODE");
+            mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+
             // Compute stats
             std::sort(mGpuTimes.begin(), mGpuTimes.end());
             float median = mGpuTimes[mGpuTimes.size() / 2];

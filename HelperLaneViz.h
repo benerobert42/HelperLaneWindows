@@ -128,6 +128,7 @@ private:
     std::vector<float> mGpuTimes;
     std::vector<std::string> mBenchmarkLog;
     std::ofstream mBenchmarkFile;
+    VizMode mSavedVizMode = VizMode::HelperLanes; // saved during helper lane measurement
 
     bool mBenchmarkFolderActive = false;
     std::vector<std::string> mFolderFiles;
