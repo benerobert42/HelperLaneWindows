@@ -39,6 +39,8 @@
 #include <shlobj.h>
 #include <sstream>
 
+#include "meshoptimizer.h"
+
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "ThirdParty/earcut.hpp/vendor/glfw/deps/stb_image_write.h"
 
@@ -171,6 +173,10 @@ void HelperLaneViz::loadSvg(const std::string& path)
 
     if (SVGLoader::TessellateSvgToMesh(path, mVertices, mIndices, triangulator, mMaxBezierDeviation))
     {
+        if (mUseMeshOptimizer)
+        {
+            optimizeMesh();
+        }
         uploadGeometry();
     }
 
@@ -236,6 +242,11 @@ void HelperLaneViz::generateCircle()
         mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
     }
 
+    if (mUseMeshOptimizer)
+    {
+        optimizeMesh();
+    }
+
     uploadGeometry();
 }
 
@@ -263,6 +274,55 @@ void HelperLaneViz::uploadGeometry()
     mpState->setVao(mpVao);
 
     mIndexCount = (uint32_t)mIndices.size();
+}
+
+void HelperLaneViz::optimizeMesh()
+{
+    if (mVertices.size() < 3 || mIndices.empty())
+        return;
+
+    const size_t vertexCount = mVertices.size();
+    const size_t indexCount = mIndices.size();
+
+    // Create temporary float3 positions for meshoptimizer (it expects xyz positions)
+    std::vector<float> positions(vertexCount * 3);
+    for (size_t i = 0; i < vertexCount; ++i)
+    {
+        positions[i * 3 + 0] = mVertices[i].pos.x;
+        positions[i * 3 + 1] = mVertices[i].pos.y;
+        positions[i * 3 + 2] = 0.0f;
+    }
+
+    // Step 1: Vertex cache optimization - reorders indices to improve vertex cache hit rate
+    std::vector<uint32_t> optimizedIndices(indexCount);
+    meshopt_optimizeVertexCache(optimizedIndices.data(), mIndices.data(), indexCount, vertexCount);
+
+    // Step 2: Overdraw optimization - reorders triangles to reduce pixel overdraw
+    // The threshold (1.05f) means we allow up to 5% worse vertex cache efficiency to reduce overdraw
+    meshopt_optimizeOverdraw(
+        optimizedIndices.data(),
+        optimizedIndices.data(),
+        indexCount,
+        positions.data(),
+        vertexCount,
+        sizeof(float) * 3, // stride
+        1.05f              // threshold
+    );
+
+    // Step 3: Vertex fetch optimization - reorders vertices and updates indices
+    std::vector<Vertex> optimizedVertices(vertexCount);
+    meshopt_optimizeVertexFetch(
+        optimizedVertices.data(),
+        optimizedIndices.data(),
+        indexCount,
+        mVertices.data(),
+        vertexCount,
+        sizeof(Vertex)
+    );
+
+    // Replace original data with optimized data
+    mVertices = std::move(optimizedVertices);
+    mIndices = std::move(optimizedIndices);
 }
 
 void HelperLaneViz::updateGridParams()
@@ -304,9 +364,9 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
     
     // Set MSAA and Grid based on config phase
     // Config 0: MSAA=1, Grid=1x1
-    // Config 1: MSAA=1, Grid=10x10
+    // Config 1: MSAA=1, Grid=100x100
     // Config 2: MSAA=4, Grid=1x1
-    // Config 3: MSAA=4, Grid=10x10
+    // Config 3: MSAA=4, Grid=100x100
     switch (configPhase)
     {
     case 0:
@@ -316,8 +376,8 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
         break;
     case 1:
         cntMSAA = 1;
-        mGridCols = 10;
-        mGridRows = 10;
+        mGridCols = 100;
+        mGridRows = 100;
         break;
     case 2:
         cntMSAA = 4;
@@ -326,8 +386,8 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
         break;
     case 3:
         cntMSAA = 4;
-        mGridCols = 10;
-        mGridRows = 10;
+        mGridCols = 100;
+        mGridRows = 100;
         break;
     }
     
@@ -913,6 +973,8 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         {9, "Earcut + Flip"},
         {10, "CDT + Flip"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
+    
+    bool meshOptChanged = w.checkbox("Use Mesh Optimizer", mUseMeshOptimizer);
 
     w.separator();
 
@@ -954,7 +1016,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         circleChanged |= w.var("Vertex Count", mCircleVertexCount, 3u, 1000u);
         circleChanged |= w.var("Radius X", mEllipseRadiusX, 0.01f, 0.5f);
         circleChanged |= w.var("Radius Y", mEllipseRadiusY, 0.01f, 0.5f);
-        if (circleChanged || modeChanged || triangChanged)
+        if (circleChanged || modeChanged || triangChanged || meshOptChanged)
         {
             generateCircle();
         }
@@ -966,7 +1028,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         {
             loadSvg(mSvgPath);
         }
-        if (triangChanged || bezierChanged)
+        if (triangChanged || bezierChanged || meshOptChanged)
         {
             loadSvg(mSvgPath);
         }

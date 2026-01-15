@@ -103,6 +103,10 @@ private:
 
     bool mMeasureTriangulationTime = false;
     double mLastTriangulationMs = 0.0;
+    
+    // Mesh optimization (meshoptimizer)
+    bool mUseMeshOptimizer = false;
+    void optimizeMesh();
 
     enum class VizMode : uint32_t
     {

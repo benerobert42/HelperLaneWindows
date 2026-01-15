@@ -27,6 +27,12 @@ target_sources(HelperLaneWindows PRIVATE
     SVGLoader.h
     ShaderTypes.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/triangle/triangle.cpp
+    # meshoptimizer sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src/allocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src/vcacheoptimizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src/vfetchoptimizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src/overdrawoptimizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src/indexgenerator.cpp
 )
 
 # Third-party headers (HEADER-ONLY)
@@ -36,6 +42,7 @@ target_include_directories(HelperLaneWindows PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/libigl/include
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/triangle
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src
 )
 
 # Shaders
