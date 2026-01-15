@@ -13,3 +13,6 @@
 [submodule "ThirdParty/meshoptimizer"]
 	path = ThirdParty/meshoptimizer
 	url = https://github.com/zeux/meshoptimizer.git
+[submodule "ThirdParty/nanosvg"]
+	path = ThirdParty/nanosvg
+	url = https://github.com/memononen/nanosvg.git

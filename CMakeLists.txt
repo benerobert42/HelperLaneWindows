@@ -43,6 +43,7 @@ target_include_directories(HelperLaneWindows PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/triangle
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/meshoptimizer/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/nanosvg/src
 )
 
 # Shaders
