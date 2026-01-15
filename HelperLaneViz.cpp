@@ -453,7 +453,7 @@ void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
     }
 
     mBenchmarkFolderActive = true;
-    mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10}; // Skip centroid fan
+    mBenchmarkMethods = {1, 3, 7, 8, 9, 10}; // Skip centroid fan
     
     // Start with first configuration (MSAA Off, Grid 1x1)
     startBenchmarkConfig(0);
