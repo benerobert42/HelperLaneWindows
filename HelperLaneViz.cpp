@@ -293,31 +293,20 @@ void HelperLaneViz::optimizeMesh()
         positions[i * 3 + 2] = 0.0f;
     }
 
-    // Step 1: Vertex cache optimization - reorders indices to improve vertex cache hit rate
+    // Vertex cache optimization - reorders indices to improve vertex cache hit rate
     std::vector<uint32_t> optimizedIndices(indexCount);
     meshopt_optimizeVertexCache(optimizedIndices.data(), mIndices.data(), indexCount, vertexCount);
 
-    // Step 2: Overdraw optimization - reorders triangles to reduce pixel overdraw
+    // Overdraw optimization - reorders triangles to reduce pixel overdraw
     // The threshold (1.05f) means we allow up to 5% worse vertex cache efficiency to reduce overdraw
     meshopt_optimizeOverdraw(
-        optimizedIndices.data(),
-        optimizedIndices.data(),
-        indexCount,
-        positions.data(),
-        vertexCount,
-        sizeof(float) * 3, // stride
-        1.05f              // threshold
+        optimizedIndices.data(), optimizedIndices.data(), indexCount, positions.data(), vertexCount, sizeof(float) * 3, 1.05f
     );
 
-    // Step 3: Vertex fetch optimization - reorders vertices and updates indices
+    // Vertex fetch optimization - reorders vertices and updates indices
     std::vector<Vertex> optimizedVertices(vertexCount);
     meshopt_optimizeVertexFetch(
-        optimizedVertices.data(),
-        optimizedIndices.data(),
-        indexCount,
-        mVertices.data(),
-        vertexCount,
-        sizeof(Vertex)
+        optimizedVertices.data(), optimizedIndices.data(), indexCount, mVertices.data(), vertexCount, sizeof(Vertex)
     );
 
     // Replace original data with optimized data
@@ -361,7 +350,7 @@ std::string selectFolder()
 void HelperLaneViz::startBenchmarkConfig(int configPhase)
 {
     mBenchmarkConfigPhase = configPhase;
-    
+
     // Set MSAA and Grid based on config phase
     // Config 0: MSAA=1, Grid=1x1
     // Config 1: MSAA=1, Grid=100x100
@@ -390,11 +379,11 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
         mGridRows = 100;
         break;
     }
-    
+
     // Apply settings
     CreateMSAATargets();
     updateGridParams();
-    
+
     // Reset iteration state
     mCurrentFolderFile = 0;
     mSyntheticShapePhase = 0;
@@ -403,12 +392,12 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
     mWaitFrameCounter = 0;
     mGpuFrameCounter = 0;
     mUseCircle = false;
-    
+
     if (!mFolderFiles.empty())
     {
         mSvgPath = mFolderFiles[0];
     }
-    
+
     // Write config header to file
     if (mBenchmarkFile.is_open())
     {
@@ -769,6 +758,14 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
     }
 }
 
+static float linearToSrgb(float x)
+{
+    x = std::max(0.0f, std::min(1.0f, x));
+    if (x <= 0.0031308f)
+        return 12.92f * x;
+    return 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
+}
+
 // Helper function to convert float16 (stored as uint16) to float
 static float float16ToFloat(uint16_t halfVal)
 {
@@ -840,35 +837,38 @@ void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>
     // Read texture data (RGBA16Float format)
     std::vector<uint8_t> textureData = pRenderContext->readTextureSubresource(renderTexture.get(), 0);
 
-    // Convert from RGBA16Float to RGBA8Unorm
-    // RGBA16Float has 2 bytes per channel, so 8 bytes per pixel
-    // RGBA8Unorm has 1 byte per channel, so 4 bytes per pixel
     size_t pixelCount = width * height;
     std::vector<uint8_t> rgba8Data(pixelCount * 4);
 
     const uint16_t* srcData = reinterpret_cast<const uint16_t*>(textureData.data());
     for (size_t i = 0; i < pixelCount; ++i)
     {
-        // Convert each float16 channel to uint8 with proper float16 decoding
         size_t srcIdx = i * 4; // 4 channels (RGBA), each 2 bytes
-
-        // Convert float16 to float, then to uint8 with proper tone mapping
-        auto convertHalfToUint8 = [](uint16_t halfVal) -> uint8_t
+        auto convertHalfToUint8_sRGB = [](uint16_t halfVal) -> uint8_t
         {
-            float val = float16ToFloat(halfVal);
-            // Clamp to [0, 1] range and convert to uint8
-            // For HDR values > 1.0, we use simple clamping (you might want tone mapping for HDR)
-            val = std::max(0.0f, std::min(1.0f, val));
-            return static_cast<uint8_t>(val * 255.0f + 0.5f);
+            float lin = float16ToFloat(halfVal);
+
+            // (optional tone map if HDR; keeping minimal diff: just clamp)
+            lin = std::max(0.0f, std::min(1.0f, lin));
+
+            float srgb = linearToSrgb(lin);
+            return static_cast<uint8_t>(srgb * 255.0f + 0.5f);
         };
 
-        rgba8Data[i * 4 + 0] = convertHalfToUint8(srcData[srcIdx + 0]); // R
-        rgba8Data[i * 4 + 1] = convertHalfToUint8(srcData[srcIdx + 1]); // G
-        rgba8Data[i * 4 + 2] = convertHalfToUint8(srcData[srcIdx + 2]); // B
-        rgba8Data[i * 4 + 3] = convertHalfToUint8(srcData[srcIdx + 3]); // A
+        auto convertHalfToUint8_linear = [](uint16_t halfVal) -> uint8_t
+        {
+            float lin = float16ToFloat(halfVal);
+            lin = std::max(0.0f, std::min(1.0f, lin));
+            return static_cast<uint8_t>(lin * 255.0f + 0.5f);
+        };
+
+        rgba8Data[i * 4 + 0] = convertHalfToUint8_sRGB(srcData[srcIdx + 0]);   // R
+        rgba8Data[i * 4 + 1] = convertHalfToUint8_sRGB(srcData[srcIdx + 1]);   // G
+        rgba8Data[i * 4 + 2] = convertHalfToUint8_sRGB(srcData[srcIdx + 2]);   // B
+        rgba8Data[i * 4 + 3] = convertHalfToUint8_linear(srcData[srcIdx + 3]); // A
     }
 
-    // Flip vertically (OpenGL/D3D coordinate system difference)
+    // Flip vertically
     std::vector<uint8_t> flippedData(pixelCount * 4);
     for (uint32_t y = 0; y < height; ++y)
     {
@@ -882,7 +882,7 @@ void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>
     std::tm tm;
     localtime_s(&tm, &time);
 
-    // Save to Users/ShaprIntel/Downloads folder
+    // Save to Users/ShaprIntel/Downloads folder - Change based on where you want to save images
     std::string downloadsPath = "C:/Users/ShaprIntel/Downloads";
     std::filesystem::create_directories(downloadsPath); // Ensure directory exists
 
@@ -973,7 +973,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         {9, "Earcut + Flip"},
         {10, "CDT + Flip"}};
     bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
-    
+
     bool meshOptChanged = w.checkbox("Use Mesh Optimizer", mUseMeshOptimizer);
 
     w.separator();
