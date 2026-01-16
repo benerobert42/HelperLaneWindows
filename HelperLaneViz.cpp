@@ -110,7 +110,7 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     pVbLayout->addElement("POSITION", 0, ResourceFormat::RG32Float, 1, 0);
     mpLayout->addBufferLayout(0, pVbLayout);
 
-    mSvgPath = "C:/Users/ShaprIntel/Downloads/1920560.svg";
+    mSvgPath = "Path to your SVG file";
     loadSvg(mSvgPath);
 
     getDevice()->getProfiler()->setEnabled(true);
@@ -443,7 +443,7 @@ void HelperLaneViz::benchmarkFolder(const std::string& folderPath)
 
     mBenchmarkFolderActive = true;
     mBenchmarkMethods = {1, 3, 7, 8, 9, 10}; // Skip centroid fan
-    
+
     // Start with first configuration (MSAA Off, Grid 1x1)
     startBenchmarkConfig(0);
 }
@@ -893,8 +893,7 @@ void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>
     std::tm tm;
     localtime_s(&tm, &time);
 
-    // Save to Users/ShaprIntel/Downloads folder - Change based on where you want to save images
-    std::string downloadsPath = "C:/Users/ShaprIntel/Downloads";
+    std::string downloadsPath = "Folder to save your image";
     std::filesystem::create_directories(downloadsPath); // Ensure directory exists
 
     char filename[256];
@@ -1065,7 +1064,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
         mBenchmarkLog.clear();
 
-        mBenchmarkFile.open("C:/Users/ShaprIntel/Downloads/triangulation_benchmark.txt", std::ios::out | std::ios::trunc);
+        mBenchmarkFile.open("Folder to output your benchmark", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
             mBenchmarkFile << "Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
     }
