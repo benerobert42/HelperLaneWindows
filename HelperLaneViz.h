@@ -29,6 +29,7 @@
 #include "Falcor.h"
 #include "Core/SampleApp.h"
 #include "Core/Pass/FullScreenPass.h"
+#include "ExtendedMeasurementAssets.h"
 
 #include <fstream>
 
@@ -64,6 +65,7 @@ private:
     ref<FullScreenPass> mpPass;
     ref<Texture> mpHelperLaneCounter;
     ref<Texture> mpDummyTexture;
+    ExtendedMeasurementAssets mExtendedMeasurementAssets;
     ref<RasterizerState> defaultRsState;
     ref<RasterizerState> wireframeRsState;
 
@@ -101,6 +103,18 @@ private:
 
     bool mUseDummyTexture = false;
 
+    enum class TranslationMode : uint32_t
+    {
+        Diagonal = 0,
+        Horizontal = 1,
+        Vertical = 2,
+    };
+
+    // Scene transform test
+    bool mTranslate1Pixel = false;
+    TranslationMode mTranslationMode = TranslationMode::Diagonal;
+    bool mRotate60Deg = false;
+
     bool mMeasureTriangulationTime = false;
     double mLastTriangulationMs = 0.0;
     
@@ -112,10 +126,17 @@ private:
     {
         HelperLanes = 0,
         Wireframe = 1,
-        Texture = 2
+        Texture = 2,
+        TextureMaterialStress = 3,
+        DerivativeAnchoredAluStress = 4,
     };
 
     VizMode mVizMode = VizMode::HelperLanes;
+
+    uint32_t mAluIterations = 128;
+    float mMaterialUvScale = 8.0f;
+    float mDetailUvScale = 6.0f;
+    float mNormalStrength = 1.0f;
 
     // Benchmarking state
     bool mBenchmarkActive = false;
@@ -143,6 +164,10 @@ private:
     void loadSvg(const std::string& path);
     void generateCircle();
     void updateGridParams();
+    void applyProgramDefines();
+    void updateExtendedMeasurementParams();
+    void bindExtendedMeasurementResources();
+    std::string getVizModeName(VizMode mode) const;
 
     void processBenchmarkStep(RenderContext* pRenderContext);
     void processBenchmarkFolderStep(RenderContext* pRenderContext);

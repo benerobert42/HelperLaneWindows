@@ -33,6 +33,7 @@
 #include "Falcor.h"
 #include "Core/Program/ProgramManager.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <windows.h>
@@ -55,6 +56,25 @@ struct GridParams
     float2 cellSize;
     float2 origin;
     float scale;
+};
+
+struct SceneTransformParams
+{
+    float2 translation;
+    float2 rotCosSin;
+};
+
+struct ExtendedMeasurementParams
+{
+    uint32_t aluIterations;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uint32_t reserved2;
+
+    float materialUvScale;
+    float detailUvScale;
+    float normalStrength;
+    float reserved3;
 };
 
 uint32_t mSampleGuiWidth = 250;
@@ -110,7 +130,7 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     pVbLayout->addElement("POSITION", 0, ResourceFormat::RG32Float, 1, 0);
     mpLayout->addBufferLayout(0, pVbLayout);
 
-    mSvgPath = "Path to your SVG file";
+    mSvgPath = "C:/Users/ShaprIntel/Downloads/2051667.svg";
     loadSvg(mSvgPath);
 
     getDevice()->getProfiler()->setEnabled(true);
@@ -128,6 +148,9 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     mpDummyTexture = getDevice()->createTexture2D(
         texWidth, texHeight, ResourceFormat::RGBA8Unorm, 1, 1, pixels.data(), ResourceBindFlags::ShaderResource
     );
+    mExtendedMeasurementAssets = ExtendedMeasurementAssetFactory::create(getDevice());
+    bindExtendedMeasurementResources();
+    applyProgramDefines();
 
     // MSAA render target
     CreateMSAATargets();
@@ -316,8 +339,8 @@ void HelperLaneViz::optimizeMesh()
 
 void HelperLaneViz::updateGridParams()
 {
-    mGridCellSize = float2(1.0f / mGridCols, 1.0f / mGridRows);
-    mGridOrigin = float2(0.0f, 0.0f);
+    mGridCellSize = float2(1.0f / (mGridCols * 1.7), 1.0f / (mGridRows * 1.7));
+    mGridOrigin = float2(0.2f, 0.2f);
     mGridScale = std::min(mGridCellSize.x, mGridCellSize.y);
 
     GridParams gridParams;
@@ -327,6 +350,62 @@ void HelperLaneViz::updateGridParams()
     gridParams.origin = mGridOrigin;
     gridParams.scale = mGridScale;
     mpVars->getRootVar()["Grid"].setBlob(gridParams);
+}
+
+void HelperLaneViz::bindExtendedMeasurementResources()
+{
+    ShaderVar dummyTexture = mpVars->getRootVar().findMember("gDummyTexture");
+    if (dummyTexture.isValid() && mpDummyTexture)
+        dummyTexture.setTexture(mpDummyTexture);
+
+    ShaderVar dummySampler = mpVars->getRootVar().findMember("gDummySampler");
+    if (dummySampler.isValid() && mExtendedMeasurementAssets.sampler)
+        dummySampler.setSampler(mExtendedMeasurementAssets.sampler);
+
+    ExtendedMeasurementAssetFactory::bind(mpVars, mExtendedMeasurementAssets);
+}
+
+void HelperLaneViz::applyProgramDefines()
+{
+    mpProgram->removeDefine("VIZ_MODE");
+    mpProgram->removeDefine("USE_DUMMY_TEXTURE");
+    mpProgram->removeDefine("READ_BACK_HELPER_LANE_COUNT");
+
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+    mpProgram->addDefine("USE_DUMMY_TEXTURE", mUseDummyTexture ? "1" : "0");
+    mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", mReadBackHelperLaneCount ? "1" : "0");
+}
+
+void HelperLaneViz::updateExtendedMeasurementParams()
+{
+    ExtendedMeasurementParams params = {};
+    params.aluIterations = std::clamp(mAluIterations, 0u, 4096u);
+    params.materialUvScale = mMaterialUvScale;
+    params.detailUvScale = mDetailUvScale;
+    params.normalStrength = mNormalStrength;
+
+    ShaderVar paramsVar = mpVars->getRootVar().findMember("ExtendedMeasurementParams");
+    if (paramsVar.isValid())
+        paramsVar.setBlob(params);
+}
+
+std::string HelperLaneViz::getVizModeName(VizMode mode) const
+{
+    switch (mode)
+    {
+    case VizMode::HelperLanes:
+        return "Helper Lanes";
+    case VizMode::Wireframe:
+        return "Wireframe";
+    case VizMode::Texture:
+        return "Texture";
+    case VizMode::TextureMaterialStress:
+        return "Texture Material Stress";
+    case VizMode::DerivativeAnchoredAluStress:
+        return "Derivative-Anchored Fixed-ALU Stress";
+    default:
+        return "Unknown";
+    }
 }
 
 std::string selectFolder()
@@ -404,7 +483,7 @@ void HelperLaneViz::startBenchmarkConfig(int configPhase)
         std::string msaaStr = (cntMSAA == 1) ? "Off" : std::to_string(cntMSAA) + "x";
         mBenchmarkFile << "\n";
         mBenchmarkFile << "=== Configuration: MSAA " << msaaStr << ", Grid " << mGridCols << "x" << mGridRows << " ===\n";
-        mBenchmarkFile << "File,Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
+        mBenchmarkFile << "File,Method,ShaderScene,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
     }
 }
 
@@ -526,18 +605,14 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
             // Save current VizMode and switch to HelperLanes for measurement
             mSavedVizMode = mVizMode;
             mVizMode = VizMode::HelperLanes;
-            mpProgram->removeDefine("VIZ_MODE");
-            mpProgram->addDefine("VIZ_MODE", "0");
 
             mReadBackHelperLaneCount = true;
-            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
+            applyProgramDefines();
         }
         if (mGpuFrameCounter > gpuFrames)
         {
             // Restore original VizMode
             mVizMode = mSavedVizMode;
-            mpProgram->removeDefine("VIZ_MODE");
-            mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
 
             // Compute stats
             std::sort(mGpuTimes.begin(), mGpuTimes.end());
@@ -551,11 +626,12 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
             // Read helper lane counter
             uint32_t helperCount = mHelperLaneCount;
             mReadBackHelperLaneCount = false;
-            mpProgram->removeDefine("READ_BACK_HELPER_LANE_COUNT");
+            applyProgramDefines();
 
             size_t totalEdgeLength;
             double uniqueEdgeLength;
             Triangulation::ComputeEdgeMetrics(mVertices, mIndices, totalEdgeLength, uniqueEdgeLength);
+            const std::string shaderScene = getVizModeName(mVizMode);
 
             std::ostringstream oss;
             if (mBenchmarkFolderActive)
@@ -573,12 +649,12 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
                 {
                     fileName = std::filesystem::path(mFolderFiles[mCurrentFolderFile]).filename().string();
                 }
-                oss << fileName << "," << methodName << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << ","
+                oss << fileName << "," << methodName << "," << shaderScene << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << ","
                     << helperCount << "," << uniqueEdgeLength;
             }
             else
             {
-                oss << methodName << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << "," << helperCount << ","
+                oss << methodName << "," << shaderScene << "," << mCpuTimeMs << "," << median << "," << mean << "," << stddev << "," << helperCount << ","
                     << uniqueEdgeLength;
             }
             std::string logLine = oss.str();
@@ -745,6 +821,31 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 
     if (mIndexCount)
     {
+        SceneTransformParams xform;
+        float pixelW = 2.0f / (float)pTargetFbo->getWidth();
+        float pixelH = 2.0f / (float)pTargetFbo->getHeight();
+        xform.translation = float2(0.f, 0.f);
+        if (mTranslate1Pixel)
+        {
+            switch (mTranslationMode)
+            {
+            case TranslationMode::Horizontal:
+                xform.translation = float2(pixelW, 0.f);
+                break;
+            case TranslationMode::Vertical:
+                xform.translation = float2(0.f, pixelH);
+                break;
+            case TranslationMode::Diagonal:
+            default:
+                xform.translation = float2(pixelW, pixelH);
+                break;
+            }
+        }
+        xform.rotCosSin = mRotate60Deg ? float2(0.5f, 0.8660254f) : float2(1.f, 0.f);
+        mpVars->getRootVar()["SceneTransform"].setBlob(xform);
+        bindExtendedMeasurementResources();
+        updateExtendedMeasurementParams();
+
         uint32_t instanceCount = mGridCols * mGridRows;
         pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
     }
@@ -950,24 +1051,14 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     bool modeChanged = w.checkbox("Use Circle", mUseCircle);
 
     // Visualization mode
-    Gui::DropdownList vizModes = {{0, "Helper Lanes"}, {1, "Wireframe"}, {2, "Texture"}};
+    Gui::DropdownList vizModes = {
+        {0, "Helper Lanes"},
+        {1, "Wireframe"},
+        {2, "Texture"},
+        {3, "Texture Material Stress"},
+        {4, "Derivative-Anchored Fixed-ALU Stress"},
+    };
     w.dropdown("Visualization", vizModes, *(uint32_t*)&mVizMode);
-
-    mpProgram->removeDefine("VIZ_MODE");
-    mpProgram->removeDefine("USE_DUMMY_TEXTURE");
-
-    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
-
-    if (mVizMode == VizMode::HelperLanes && mUseDummyTexture)
-    {
-        mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
-        mpVars->setTexture("gDummyTexture", mpDummyTexture);
-    }
-
-    if (mVizMode == VizMode::Texture)
-    {
-        mpVars->setTexture("gDummyTexture", mpDummyTexture);
-    }
 
     // Triangulation type
     Gui::DropdownList triangTypes = {
@@ -992,24 +1083,11 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
     if (mReadBackHelperLaneCount)
     {
-        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
         std::string helperLaneCountStr = "Helper lane count: " + std::to_string(mHelperLaneCount);
         w.text(helperLaneCountStr);
     }
-    else
-    {
-        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
-    }
-
-    mpProgram->removeDefine("USE_DUMMY_TEXTURE");
 
     w.checkbox("Bind dummy texture (force helper lanes)", mUseDummyTexture);
-
-    if (mUseDummyTexture)
-    {
-        mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
-        mpVars->setTexture("gDummyTexture", mpDummyTexture);
-    }
 
     w.checkbox("Measure triangulation time", mMeasureTriangulationTime);
 
@@ -1045,6 +1123,26 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     }
 
     w.separator();
+    w.checkbox("Translate 1 pixel", mTranslate1Pixel);
+    if (mTranslate1Pixel)
+    {
+        Gui::DropdownList translationModes = {
+            {(uint32_t)TranslationMode::Diagonal, "Diagonal"},
+            {(uint32_t)TranslationMode::Horizontal, "Horizontal"},
+            {(uint32_t)TranslationMode::Vertical, "Vertical"},
+        };
+        w.dropdown("Direction", translationModes, *(uint32_t*)&mTranslationMode);
+    }
+    w.checkbox("Rotate 60 degrees", mRotate60Deg);
+
+    w.separator();
+    w.text("Extended measurement shader");
+    w.var("Material UV Scale", mMaterialUvScale, 0.5f, 32.0f);
+    w.var("Detail UV Scale", mDetailUvScale, 1.0f, 16.0f);
+    w.var("Normal Strength", mNormalStrength, 0.0f, 2.0f);
+    w.var("ALU Iterations", mAluIterations, 0u, 4096u);
+
+    w.separator();
     bool gridChanged = false;
     gridChanged |= w.var("Grid Cols", mGridCols, 1u, 100u);
     gridChanged |= w.var("Grid Rows", mGridRows, 1u, 100u);
@@ -1064,9 +1162,9 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         mBenchmarkMethods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
         mBenchmarkLog.clear();
 
-        mBenchmarkFile.open("Folder to output your benchmark", std::ios::out | std::ios::trunc);
+        mBenchmarkFile.open("C:/Users/ShaprIntel/Downloads/Benchmark.txt", std::ios::out | std::ios::trunc);
         if (mBenchmarkFile.is_open())
-            mBenchmarkFile << "Method,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
+            mBenchmarkFile << "Method,ShaderScene,CPU_Time_ms,GPU_Median_ms,GPU_Mean_ms,GPU_StdDev_ms,HelperLaneCount,EdgeLength\n";
     }
 
     if (w.button("Benchmark Folder"))
@@ -1093,6 +1191,8 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     {
         resizeWindow(mDesiredWindowWidth, mDesiredWindowHeight);
     }
+
+    applyProgramDefines();
 }
 
 bool HelperLaneViz::onKeyEvent(const KeyboardEvent& keyEvent)

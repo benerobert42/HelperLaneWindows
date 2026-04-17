@@ -21,6 +21,8 @@ set_source_files_properties(
 target_sources(HelperLaneWindows PRIVATE
     HelperLaneViz.cpp
     HelperLaneViz.h
+    ExtendedMeasurementAssets.cpp
+    ExtendedMeasurementAssets.h
     TriangulationHelpers.cpp
     TriangulationHelpers.h
     SVGLoader.cpp

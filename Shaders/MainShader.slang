@@ -20,7 +20,11 @@ struct VSIn
 struct V2P
 {
     float4 pos : SV_Position;
+    float2 materialUv : TEXCOORD0;
+    float2 screenUv : TEXCOORD1;
 };
+
+#include "ExtendedMeasurements.slang"
 
 cbuffer Grid
 {
@@ -29,6 +33,12 @@ cbuffer Grid
     float2 cellSize;
     float2 origin;
     float scale;
+};
+
+cbuffer SceneTransform
+{
+    float2 translation; // NDC units
+    float2 rotCosSin;   // (cos, sin) of rotation angle
 };
 
 RWTexture2D<uint> gHelperLaneCounter;
@@ -43,8 +53,12 @@ V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
     float2 local = v.pos * scale;
     float2 worldPos = cellOrigin + local;
     float2 ndc = worldPos * 2.0 - 1.0;
+    float2 rotated = float2(ndc.x * rotCosSin.x - ndc.y * rotCosSin.y,
+                            ndc.x * rotCosSin.y + ndc.y * rotCosSin.x);
     V2P o;
-    o.pos = float4(ndc, 0.0, 1.0);
+    o.pos = float4(rotated + translation, 0.0, 1.0);
+    o.materialUv = v.pos;
+    o.screenUv = worldPos;
     return o;
 }
 
@@ -83,7 +97,13 @@ float4 psMain(V2P input) : SV_Target
     return kColors[clamp(sum, 0u, 3u)];
 #elif VIZ_MODE == 1
     return float4(0, 0, 0, 1);
-#else
+#elif VIZ_MODE == 2
     return gDummyTexture.Sample(gDummySampler, input.pos.xy * 0.5 + 0.5);
+#elif VIZ_MODE == 3
+    return evaluateTextureMaterialStress(input.materialUv, input.screenUv, input.pos);
+#elif VIZ_MODE == 4
+    return evaluateDerivativeAnchoredAluStress(input.materialUv, input.screenUv, input.pos);
+#else
+    return float4(1.0, 0.0, 1.0, 1.0);
 #endif
 }
