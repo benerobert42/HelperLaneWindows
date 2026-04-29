@@ -23,6 +23,12 @@ target_sources(HelperLaneWindows PRIVATE
     HelperLaneViz.h
     TriangulationHelpers.cpp
     TriangulationHelpers.h
+    Triangulation3D.cpp
+    Triangulation3D.h
+    ProceduralGeometry3D.cpp
+    ProceduralGeometry3D.h
+    ObjMeshLoader.cpp
+    ObjMeshLoader.h
     SVGLoader.cpp
     SVGLoader.h
     ShaderTypes.h

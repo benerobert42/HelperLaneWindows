@@ -61,6 +61,7 @@ private:
     ref<Buffer> mpIB;
     uint32_t mIndexCount = 0;
     ref<VertexLayout> mpLayout;
+    ref<VertexLayout> mpLayout3D;
     ref<FullScreenPass> mpPass;
     ref<Texture> mpHelperLaneCounter;
     ref<Texture> mpDummyTexture;
@@ -76,12 +77,53 @@ private:
     // current polygon (editable)
     std::vector<Vertex> mVertices;
     std::vector<uint32_t> mIndices;
+    std::vector<float3> mVolumeVertices;
+    std::vector<uint32_t> mVolumeIndices;
 
     // Rendering mode
+    enum class GeometryDimensionality : uint32_t
+    {
+        Planar = 0,
+        Volumetric = 1
+    };
+
+    GeometryDimensionality mGeometryDimensionality = GeometryDimensionality::Planar;
     bool mUseCircle = false;
     uint32_t mCircleVertexCount = 32;
     float mEllipseRadiusX = 0.4f;
     float mEllipseRadiusY = 0.4f;
+    uint32_t mVolumeGeometryType = 0;
+    uint32_t mVolumeTriangulationType = 0;
+    uint32_t mVolumeTargetVertexCount = 512;
+    uint32_t mVolumeLatitudeSegments = 31;
+    uint32_t mVolumeLongitudeSegments = 17;
+    float mVolumeRadius = 0.5f;
+    float mVolumeBoundsRadius = 0.5f;
+    uint32_t mVolumeSourceVertexCount = 512;
+    uint32_t mVolumeSourceFaceCount = 0;
+    uint32_t mVolumeSourceTriangleCount = 0;
+    std::string mVolumeGeometryName = "Sphere";
+    std::string mVolumeObjPath;
+    std::string mVolumeObjStatus;
+    bool mVolumeNormalizeObj = true;
+    uint32_t mVolumeObjFanTriangulatedFaceCount = 0;
+    float mVolumeMaxNormalDeviationDegrees = 15.0f;
+    float mVolumeMaxRelativePlaneDeviation = 0.005f;
+    uint32_t mVolumeMaxFacesPerPatch = 64;
+    uint32_t mVolumePclMaximumNearestNeighbors = 100;
+    float mVolumePclMu = 2.5f;
+    float mVolumePclSearchRadius = 0.0f;
+    float mVolumePclMinimumAngleDegrees = 10.0f;
+    float mVolumePclMaximumAngleDegrees = 120.0f;
+    uint32_t mVolumeInstanceCount = 1;
+    bool mVolumeUse3DInstancing = false;
+    uint32_t mVolumeGridCols = 1;
+    uint32_t mVolumeGridRows = 1;
+    uint32_t mVolumeGridLayers = 1;
+    float mVolumeGridSpacing = 1.25f;
+    float4x4 mVolumeModelTransform = float4x4::identity();
+    uint32_t mVolumePatchCount = 0;
+    uint32_t mVolumeFailedPatchCount = 0;
 
     // SVG loading
     std::string mSvgPath;
@@ -112,7 +154,8 @@ private:
     {
         HelperLanes = 0,
         Wireframe = 1,
-        Texture = 2
+        Texture = 2,
+        MaterialStress = 3
     };
 
     VizMode mVizMode = VizMode::HelperLanes;
@@ -130,6 +173,35 @@ private:
     std::ofstream mBenchmarkFile;
     VizMode mSavedVizMode = VizMode::HelperLanes; // saved during helper lane measurement
 
+    bool mVolumeBenchmarkActive = false;
+    int mVolumeBenchmarkStep = 0;
+    int mVolumeBenchmarkMethod = 0;
+    std::vector<uint32_t> mVolumeBenchmarkMethods;
+    int mVolumeBenchmarkWaitFrameCounter = 0;
+    int mVolumeBenchmarkGpuFrameCounter = 0;
+    double mVolumeBenchmarkCpuTimeMs = 0.0;
+    float mVolumeBenchmarkMedianGpuMs = 0.0f;
+    uint32_t mVolumeBenchmarkOrientation = 0;
+    uint32_t mVolumeBenchmarkCompletedOrientations = 0;
+    double mVolumeBenchmarkGpuMedianSum = 0.0;
+    double mVolumeBenchmarkGpuMedianMin = 0.0;
+    double mVolumeBenchmarkGpuMedianMax = 0.0;
+    double mVolumeBenchmarkProjectedEdgeLengthSum = 0.0;
+    double mVolumeBenchmarkHelperLaneSum = 0.0;
+    std::vector<float> mVolumeBenchmarkGpuTimes;
+    std::string mVolumeBenchmarkOutputPath;
+    uint32_t mSavedVolumeTriangulationType = 0;
+    bool mSavedReadBackHelperLaneCount = false;
+    struct VolumeBenchmarkDetailRow
+    {
+        uint32_t orientation = 0;
+        uint32_t method = 0;
+        double gpuMedianMs = 0.0;
+        double projectedEdgeLength = 0.0;
+        double helperLaneCount = 0.0;
+    };
+    std::vector<VolumeBenchmarkDetailRow> mVolumeBenchmarkDetailRows;
+
     bool mBenchmarkFolderActive = false;
     std::vector<std::string> mFolderFiles;
     int mCurrentFolderFile = 0;
@@ -140,12 +212,30 @@ private:
     void startBenchmarkConfig(int configPhase);
 
     void uploadGeometry();
+    void uploadVolumeGeometry();
     void loadSvg(const std::string& path);
     void generateCircle();
+    void generateVolumeGeometry();
+    void applyVolumeTargetVertexCount();
     void updateGridParams();
+    void updateVolumeGridParams();
+    void updateVolumeModelParams();
+    void updateCameraParams(uint32_t width = 0, uint32_t height = 0);
 
     void processBenchmarkStep(RenderContext* pRenderContext);
     void processBenchmarkFolderStep(RenderContext* pRenderContext);
+    void startVolumeBenchmark();
+    void processVolumeBenchmarkStep(RenderContext* pRenderContext);
+    void writeVolumeBenchmarkHeader();
+    void writeVolumeBenchmarkRow(
+        const std::string& methodName,
+        double averageMedianGpuMs,
+        double minMedianGpuMs,
+        double maxMedianGpuMs,
+        double averageProjectedEdgeLength,
+        double averageHelperLaneCount
+    );
+    void writeVolumeBenchmarkDetails();
     void benchmarkFolder(const std::string& folderPath);
     
     // Screenshot functionality
