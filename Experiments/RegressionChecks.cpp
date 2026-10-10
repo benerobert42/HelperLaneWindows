@@ -1,4 +1,6 @@
 #include "Import/ObjMeshLoader.h"
+#include "Import/ModelPresets.h"
+#include "Triangulation/MeshValidation.h"
 #include "Triangulation/2D/TriangulationHelpers.h"
 #include "Experiments/BenchmarkGeometry.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
@@ -7,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <array>
 
 namespace
 {
@@ -88,6 +91,15 @@ int runRegressionChecks()
             );
             std::cout << name << ": " << source.indices.size() / 3 << " triangles, " << flipped.flips << " flips, patch status "
                       << int(output.status) << "\n";
+        }
+        for (const auto& model : {std::array<uint32_t, 3>{8, 7958, 15744}, {9, 2503, 4968}, {10, 1292, 2464}})
+        {
+            const auto loaded = ObjMeshLoader::load(getModelPresetPath(model[0]).string());
+            require(loaded.success && loaded.mesh.vertices.size() == model[1], "Preset must load through the OBJ pipeline");
+            const auto source = useSourceMeshTriangulation(loaded.mesh);
+            require(source.success && source.indices.size() == model[2] * 3, "Preset Source Faces must preserve triangles");
+            require(MeshValidation::audit(source, source).topologyOK(), "Preset source must pass the topology audit");
+            std::cout << getModelPresetPath(model[0]).filename().string() << ": " << model[1] << " vertices, " << model[2] << " triangles\n";
         }
         std::cout << "Regression checks passed.\n";
         return 0;

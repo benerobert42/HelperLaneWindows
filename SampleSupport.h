@@ -66,7 +66,8 @@ float4x4 makeVolumeViewProj(
     uint32_t gridLayers,
     bool use3DGrid,
     float gridSpacing,
-    float boundsRadius
+    float boundsRadius,
+    float3* cameraPosition = nullptr
 );
 float3 getVolumeInstanceOffset(
     uint32_t instanceId,

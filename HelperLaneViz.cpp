@@ -31,6 +31,7 @@
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 
 #include "Import/ObjMeshLoader.h"
+#include "Import/ModelPresets.h"
 #include "Triangulation/3D/ProceduralGeometry3D.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include "Triangulation/2D/TriangulationHelpers.h"
@@ -56,9 +57,6 @@
 #include <sstream>
 
 #include "meshoptimizer.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "ThirdParty/earcut.hpp/vendor/glfw/deps/stb_image_write.h"
 
 
 using namespace Falcor;
@@ -102,6 +100,7 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
 
     mpProgram = Program::create(getDevice(), d);
     mpProgram->addDefine("USE_3D_GEOMETRY", "0");
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
     mpVars = ProgramVars::create(getDevice(), mpProgram.get());
     mpState = GraphicsState::create(getDevice());
     mpState->setProgram(mpProgram);
@@ -132,6 +131,8 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     mSvgPath = "Path to your SVG file";
     loadSvg(mSvgPath);
     generateVolumeGeometry();
+    if (mCaptureAndExit && !mVolumeResultValid)
+        throw std::runtime_error("Screenshot requires a valid triangulation: " + mVolumeObjStatus);
 
     getDevice()->getProfiler()->setEnabled(true);
 
@@ -337,11 +338,12 @@ void HelperLaneViz::generateVolumeGeometry()
     triangulationOptions.pclMaximumAngleDegrees = mVolumePclMaximumAngleDegrees;
 
     mVolumeGeometryName = getVolumeGeometryName(mVolumeGeometryType);
+    const auto objPath = mVolumeGeometryType >= 8 ? getModelPresetPath(mVolumeGeometryType).string() : mVolumeObjPath;
     std::ostringstream sourceKey;
     sourceKey << std::setprecision(9) << mVolumeGeometryType << ':' << mVolumeLatitudeSegments << ':' << mVolumeLongitudeSegments << ':'
-              << mVolumeRadius << ':' << mVolumeNormalizeObj << ':' << mVolumeObjPath;
-    if (isObjVolumeGeometry(mVolumeGeometryType) && !benchmarkRunning() && std::filesystem::exists(mVolumeObjPath))
-        sourceKey << ':' << std::filesystem::last_write_time(mVolumeObjPath).time_since_epoch().count();
+              << mVolumeRadius << ':' << mVolumeNormalizeObj << ':' << objPath;
+    if (isObjVolumeGeometry(mVolumeGeometryType) && !benchmarkRunning() && std::filesystem::exists(objPath))
+        sourceKey << ':' << std::filesystem::last_write_time(objPath).time_since_epoch().count();
     const auto requestedSourceKey = benchmarkRunning() && !mVolumeSourceKey.empty() ? mVolumeSourceKey : sourceKey.str();
     if (requestedSourceKey != mVolumeSourceKey)
     {
@@ -404,12 +406,15 @@ void HelperLaneViz::generateVolumeGeometry()
                 float3(0.0f, 0.0f, 0.0f)
             );
             break;
+        case 8:
+        case 9:
+        case 10:
         case 7:
         {
             ObjMeshLoader::LoadOptions loadOptions;
             loadOptions.centerAndScale = mVolumeNormalizeObj;
             loadOptions.targetRadius = mVolumeRadius;
-            ObjMeshLoader::LoadResult loadResult = ObjMeshLoader::load(mVolumeObjPath, loadOptions);
+            ObjMeshLoader::LoadResult loadResult = ObjMeshLoader::load(objPath, loadOptions);
             sourceMesh = std::move(loadResult.mesh);
             mVolumeObjStatus = loadResult.message;
             mVolumeObjPolygonFaceCount = loadResult.polygonFaceCount;
@@ -417,9 +422,9 @@ void HelperLaneViz::generateVolumeGeometry()
             {
                 mVolumeObjStatus += " Warnings: " + std::to_string(loadResult.warnings.size());
             }
-            if (loadResult.success)
+            if (loadResult.success && mVolumeGeometryType == 7)
             {
-                mVolumeGeometryName = "OBJ: " + std::filesystem::path(mVolumeObjPath).filename().string();
+                mVolumeGeometryName = "OBJ: " + std::filesystem::path(objPath).filename().string();
             }
             break;
         }
@@ -441,7 +446,7 @@ void HelperLaneViz::generateVolumeGeometry()
     }
     const auto& sourceMesh = mVolumeCachedSource;
     if (mVolumeGeometryType == 7)
-        mVolumeGeometryName = "OBJ: " + std::filesystem::path(mVolumeObjPath).filename().string();
+        mVolumeGeometryName = "OBJ: " + std::filesystem::path(objPath).filename().string();
     std::ostringstream patchKey;
     patchKey << std::setprecision(9) << mVolumeMaxNormalDeviationDegrees << ':' << mVolumeMaxRelativePlaneDeviation << ':'
              << mVolumeMaxFacesPerPatch;
@@ -574,14 +579,14 @@ void HelperLaneViz::updateVolumeGridParams()
 
     if (mVolumeUse3DInstancing)
     {
-        mVolumeGridCols = std::max(1u, static_cast<uint32_t>(std::ceil(std::cbrt(static_cast<float>(instanceCount) * gridAspect))));
+        mVolumeGridCols = std::min(instanceCount, std::max(1u, static_cast<uint32_t>(std::ceil(std::cbrt(static_cast<float>(instanceCount) * gridAspect)))));
         const uint32_t remainingAfterCols = std::max(1u, (instanceCount + mVolumeGridCols - 1u) / mVolumeGridCols);
         mVolumeGridRows = std::max(1u, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<float>(remainingAfterCols)))));
         mVolumeGridLayers = std::max(1u, (instanceCount + mVolumeGridCols * mVolumeGridRows - 1u) / (mVolumeGridCols * mVolumeGridRows));
     }
     else
     {
-        mVolumeGridCols = std::max(1u, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<float>(instanceCount) * gridAspect))));
+        mVolumeGridCols = std::min(instanceCount, std::max(1u, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<float>(instanceCount) * gridAspect)))));
         mVolumeGridRows = std::max(1u, (instanceCount + mVolumeGridCols - 1u) / mVolumeGridCols);
         mVolumeGridLayers = 1;
     }
@@ -685,58 +690,66 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
         finishBenchmarkSession(std::string("Benchmark failed: ") + e.what());
     }
 
-    mpState->setFbo(mpFbo);
-    float4 bgColor = (mVizMode == VizMode::Wireframe) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
-
-    mpProgram->addDefine("USE_3D_GEOMETRY", mGeometryDimensionality == GeometryDimensionality::Volumetric ? "1" : "0");
-    if (cntMSAA > 1)
+    if (mGeometryDimensionality == GeometryDimensionality::Volumetric && mVizMode == VizMode::LitPreview)
     {
-        pRenderContext->clearFbo(mpFbo.get(), bgColor, 1.f, 0);
+        renderLitPreview(pRenderContext, cntMSAA > 1 ? mpFbo : pTargetFbo);
+    }
+    else
+    {
         mpState->setFbo(mpFbo);
-    }
-    else
-    {
-        pRenderContext->clearFbo(pTargetFbo.get(), bgColor, 1.f, 0);
-        mpState->setFbo(pTargetFbo);
-    }
+        float4 bgColor = (mVizMode == VizMode::Wireframe) ? float4(1, 1, 1, 1) : float4(0, 0, 0, 0);
 
-    if (mpHelperLaneCounter)
-    {
-        pRenderContext->clearUAV(mpHelperLaneCounter->getUAV().get(), uint4(0));
-    }
-
-    if (mVizMode == VizMode::Wireframe)
-    {
-        mpState->setRasterizerState(wireframeRsState);
-    }
-    else
-    {
-        mpState->setRasterizerState(defaultRsState);
-    }
-
-    mLastDrawMs = std::numeric_limits<double>::quiet_NaN();
-    if (mIndexCount)
-    {
-        const bool timeDraw = benchmarkRunning() && !mReadBackHelperLaneCount;
-        if (timeDraw)
-            mpDrawTimer->begin();
-        uint32_t instanceCount =
-            mGeometryDimensionality == GeometryDimensionality::Volumetric ? std::max(mVolumeInstanceCount, 1u) : mGridCols * mGridRows;
-        pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
-        if (timeDraw)
+        mpProgram->addDefine("USE_3D_GEOMETRY", mGeometryDimensionality == GeometryDimensionality::Volumetric ? "1" : "0");
+        if (cntMSAA > 1)
         {
-            mpDrawTimer->end();
-            mpDrawTimer->resolve();
-            pRenderContext->submit(true);
-            mLastDrawMs = mpDrawTimer->getElapsedTime();
+            pRenderContext->clearFbo(mpFbo.get(), bgColor, 1.f, 0);
+            mpState->setFbo(mpFbo);
         }
-    }
+        else
+        {
+            pRenderContext->clearFbo(pTargetFbo.get(), bgColor, 1.f, 0);
+            mpState->setFbo(pTargetFbo);
+        }
 
-    if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount)
-    {
-        std::vector<uint8_t> counterData = pRenderContext->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
-        mHelperLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[0];
-        mActiveLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[1];
+        if (mpHelperLaneCounter)
+        {
+            pRenderContext->clearUAV(mpHelperLaneCounter->getUAV().get(), uint4(0));
+        }
+
+        if (mVizMode == VizMode::Wireframe)
+        {
+            mpState->setRasterizerState(wireframeRsState);
+        }
+        else
+        {
+            mpState->setRasterizerState(defaultRsState);
+        }
+
+        mLastDrawMs = std::numeric_limits<double>::quiet_NaN();
+        if (mIndexCount)
+        {
+            const bool timeDraw = benchmarkRunning() && !mReadBackHelperLaneCount;
+            if (timeDraw)
+                mpDrawTimer->begin();
+            uint32_t instanceCount =
+                mGeometryDimensionality == GeometryDimensionality::Volumetric ? std::max(mVolumeInstanceCount, 1u) : mGridCols * mGridRows;
+            pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
+            if (timeDraw)
+            {
+                mpDrawTimer->end();
+                mpDrawTimer->resolve();
+                pRenderContext->submit(true);
+                mLastDrawMs = mpDrawTimer->getElapsedTime();
+            }
+        }
+
+        if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount)
+        {
+            std::vector<uint8_t> counterData = pRenderContext->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
+            mHelperLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[0];
+            mActiveLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[1];
+        }
+
     }
 
     if (cntMSAA > 1)
@@ -748,159 +761,9 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
     // Save screenshot if requested (before ImGui is rendered)
     if (mRequestScreenshot)
     {
-        saveScreenshot(pRenderContext, pTargetFbo);
+        saveScreenshot(pTargetFbo);
         mRequestScreenshot = false;
-    }
-}
-
-static float linearToSrgb(float x)
-{
-    x = std::max(0.0f, std::min(1.0f, x));
-    if (x <= 0.0031308f)
-        return 12.92f * x;
-    return 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
-}
-
-// Helper function to convert float16 (stored as uint16) to float
-static float float16ToFloat(uint16_t halfVal)
-{
-    // IEEE 754 half-precision float format:
-    // Sign: 1 bit, Exponent: 5 bits, Mantissa: 10 bits
-    uint32_t sign = (halfVal & 0x8000) << 16;
-    uint32_t exp = (halfVal & 0x7C00) >> 10;
-    uint32_t mantissa = halfVal & 0x03FF;
-
-    if (exp == 0)
-    {
-        // Zero or denormal
-        if (mantissa == 0)
-        {
-            return sign ? -0.0f : 0.0f;
-        }
-        // Denormal: convert to normalized float
-        // Denormals use implicit leading 0 instead of 1
-        // Value = mantissa * 2^(-14) * 2^(-10) = mantissa * 2^(-24)
-        float val = static_cast<float>(mantissa) * (1.0f / 16777216.0f); // 2^-24
-        return sign ? -val : val;
-    }
-    else if (exp == 31)
-    {
-        // Infinity or NaN
-        if (mantissa == 0)
-        {
-            return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
-        }
-        return std::numeric_limits<float>::quiet_NaN();
-    }
-    else
-    {
-        // Normal number
-        // Float32: sign(1) + exp(8) + mantissa(23)
-        // Float16: sign(1) + exp(5) + mantissa(10)
-        // Convert: exp16 - 15 + 127 = exp32
-        uint32_t exp32 = (exp - 15 + 127) << 23;
-        uint32_t mantissa32 = mantissa << 13; // Shift left by (23-10) = 13
-        uint32_t bits = sign | exp32 | mantissa32;
-        return *reinterpret_cast<float*>(&bits);
-    }
-}
-
-void HelperLaneViz::saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
-{
-    // Get the render target texture (without ImGui overlay)
-    ref<Texture> renderTexture;
-    if (cntMSAA > 1)
-    {
-        // Use the resolved texture if MSAA is enabled
-        renderTexture = mpResolvedTexture;
-    }
-    else
-    {
-        // Use the target FBO texture directly
-        renderTexture = pTargetFbo->getColorTexture(0);
-    }
-
-    if (!renderTexture)
-    {
-        return;
-    }
-
-    // Get texture dimensions
-    uint32_t width = renderTexture->getWidth();
-    uint32_t height = renderTexture->getHeight();
-
-    // Read texture data (RGBA16Float format)
-    std::vector<uint8_t> textureData = pRenderContext->readTextureSubresource(renderTexture.get(), 0);
-
-    size_t pixelCount = width * height;
-    std::vector<uint8_t> rgba8Data(pixelCount * 4);
-
-    const uint16_t* srcData = reinterpret_cast<const uint16_t*>(textureData.data());
-    for (size_t i = 0; i < pixelCount; ++i)
-    {
-        size_t srcIdx = i * 4; // 4 channels (RGBA), each 2 bytes
-        auto convertHalfToUint8_sRGB = [](uint16_t halfVal) -> uint8_t
-        {
-            float lin = float16ToFloat(halfVal);
-
-            // (optional tone map if HDR; keeping minimal diff: just clamp)
-            lin = std::max(0.0f, std::min(1.0f, lin));
-
-            float srgb = linearToSrgb(lin);
-            return static_cast<uint8_t>(srgb * 255.0f + 0.5f);
-        };
-
-        auto convertHalfToUint8_linear = [](uint16_t halfVal) -> uint8_t
-        {
-            float lin = float16ToFloat(halfVal);
-            lin = std::max(0.0f, std::min(1.0f, lin));
-            return static_cast<uint8_t>(lin * 255.0f + 0.5f);
-        };
-
-        rgba8Data[i * 4 + 0] = convertHalfToUint8_sRGB(srcData[srcIdx + 0]);   // R
-        rgba8Data[i * 4 + 1] = convertHalfToUint8_sRGB(srcData[srcIdx + 1]);   // G
-        rgba8Data[i * 4 + 2] = convertHalfToUint8_sRGB(srcData[srcIdx + 2]);   // B
-        rgba8Data[i * 4 + 3] = convertHalfToUint8_linear(srcData[srcIdx + 3]); // A
-    }
-
-    // Flip vertically
-    std::vector<uint8_t> flippedData(pixelCount * 4);
-    for (uint32_t y = 0; y < height; ++y)
-    {
-        uint32_t srcRow = height - 1 - y;
-        memcpy(&flippedData[y * width * 4], &rgba8Data[srcRow * width * 4], width * 4);
-    }
-
-    // Generate filename with timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::tm tm;
-    localtime_s(&tm, &time);
-
-    std::string downloadsPath = "Folder to save your image";
-    std::filesystem::create_directories(downloadsPath); // Ensure directory exists
-
-    char filename[256];
-    snprintf(
-        filename,
-        sizeof(filename),
-        "%s/screenshot_%04d%02d%02d_%02d%02d%02d.png",
-        downloadsPath.c_str(),
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec
-    );
-
-    // Save as PNG using stb_image_write (lossless format for pixel precision)
-    int stride = width * 4;
-    int result = stbi_write_png(filename, width, height, 4, flippedData.data(), stride);
-
-    if (result)
-    {
-        // Success - could log this if needed
+        if (mCaptureAndExit) shutdown();
     }
 }
 
@@ -955,9 +818,12 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
     // Visualization mode
     Gui::DropdownList vizModes = {{0, "Helper Lanes"}, {1, "Wireframe"}, {2, "Texture"}, {3, "Synthetic Wave + 8 samples"}};
+    if (isVolumetric) vizModes.push_back({4, "Lit Preview (GraphEx Raster)"});
+    else if (mVizMode == VizMode::LitPreview) mVizMode = VizMode::HelperLanes;
     w.dropdown("Visualization", vizModes, *(uint32_t*)&mVizMode);
+    if (mVizMode == VizMode::LitPreview) mLitSettings.drawGui(w);
 
-    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
     mpProgram->addDefine("USE_3D_GEOMETRY", isVolumetric ? "1" : "0");
     if (dimensionalityChanged)
         updateCameraParams();
@@ -971,25 +837,29 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
     w.separator();
 
-    w.checkbox("Read back helper lane count", mReadBackHelperLaneCount);
-
-    if (mReadBackHelperLaneCount)
+    if (mVizMode != VizMode::LitPreview)
     {
-        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
-        std::string helperLaneCountStr = "Helper lane count: " + std::to_string(mHelperLaneCount);
-        w.text(helperLaneCountStr);
-    }
-    else
-    {
-        mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
-    }
+        w.checkbox("Read back helper lane count", mReadBackHelperLaneCount);
 
-    w.checkbox("Bind dummy texture (force helper lanes)", mUseDummyTexture);
+        if (mReadBackHelperLaneCount)
+        {
+            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
+            std::string helperLaneCountStr = "Helper lane count: " + std::to_string(mHelperLaneCount);
+            w.text(helperLaneCountStr);
+        }
+        else
+        {
+            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
+        }
 
-    if (mUseDummyTexture)
-    {
-        mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
-        mpVars->setTexture("gDummyTexture", mpDummyTexture);
+        w.checkbox("Bind dummy texture (force helper lanes)", mUseDummyTexture);
+
+        if (mUseDummyTexture)
+        {
+            mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
+            mpVars->setTexture("gDummyTexture", mpDummyTexture);
+        }
+
     }
 
     w.checkbox("Measure triangulation time", mMeasureTriangulationTime);
@@ -1011,7 +881,10 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             {4, "Saddle Stress Patch"},
             {5, "Folded Sheet"},
             {6, "Clustered Wave Patch"},
-            {7, "OBJ File"}
+            {7, "OBJ File"},
+            {8, "Suzanne (OBJ)"},
+            {9, "Bunny (OBJ)"},
+            {10, "Teapot (OBJ)"}
         };
         bool geometryChanged = w.dropdown("Volume Geometry", volumeGeometryTypes, mVolumeGeometryType);
         if (geometryChanged)
@@ -1040,7 +913,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
         if (isObjVolumeGeometry(mVolumeGeometryType))
         {
-            volumeChanged |= w.textbox("OBJ Path", mVolumeObjPath);
+            if (mVolumeGeometryType == 7) volumeChanged |= w.textbox("OBJ Path", mVolumeObjPath);
             volumeChanged |= w.checkbox("Normalize OBJ to Scale", mVolumeNormalizeObj);
         }
         else
@@ -1235,6 +1108,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
     }
 
     w.separator();
+    w.textbox("PNG Path", mScreenshotPath);
     if (w.button("Save Screenshot"))
     {
         mRequestScreenshot = true;
@@ -1318,6 +1192,8 @@ int runMain(int argc, char** argv)
         return runRegressionChecks();
     if (argc > 1 && std::string(argv[1]) == "--perf")
         return runPerformanceBenchmark(argc, argv);
+    if (argc > 1 && std::string(argv[1]) == "--screenshot")
+        return runScreenshot(argc, argv);
     SampleAppConfig config;
     config.windowDesc.title = "Falcor Project Template";
     config.windowDesc.resizableWindow = true;

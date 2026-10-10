@@ -8,7 +8,6 @@
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include "meshoptimizer.h"
-#include "ThirdParty/earcut.hpp/vendor/glfw/deps/stb_image_write.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -242,11 +241,9 @@ class PerformanceApp : public SampleApp
         }
         if (!captured && p.name == "Source" && msaa == 1 && stress == 0)
         {
-            auto pixels = context->readTextureSubresource(fbo->getColorTexture(0).get(), 0);
             auto path = o.output;
             path.replace_extension(".png");
-            if (!stbi_write_png(path.string().c_str(), o.width, o.height, 4, pixels.data(), o.width * 4))
-                throw std::runtime_error("Frame capture failed.");
+            fbo->getColorTexture(0)->captureToFile(0, 0, path, Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None, false);
             captured = true;
         }
         // Instrumentation runs separately and is never included in timed draws.

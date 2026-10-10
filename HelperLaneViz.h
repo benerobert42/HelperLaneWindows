@@ -31,6 +31,7 @@
 #include "Core/API/GpuTimer.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include <optional>
+#include "Rendering/LitPreview.h"
 #include "Triangulation/3D/ReferenceSurface.h"
 
 #include <fstream>
@@ -168,7 +169,8 @@ private:
         HelperLanes = 0,
         Wireframe = 1,
         Texture = 2,
-        MaterialStress = 3
+        MaterialStress = 3,
+        LitPreview = 4
     };
 
     VizMode mVizMode = VizMode::HelperLanes;
@@ -188,6 +190,7 @@ private:
     void beginBenchmarkSession();
     void writeBenchmarkMetadata(const std::string& path);
     friend int runInteractiveSmoke();
+    friend int runScreenshot(int argc, char** argv);
     bool advanceInteractiveSmoke();
     int mSmokeStage = -1;
     uint32_t mSmokeFrames = 0;
@@ -298,7 +301,12 @@ private:
     void benchmarkFolder(const std::string& folderPath);
 
     // Screenshot functionality
-    void saveScreenshot(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo);
+    void renderLitPreview(RenderContext* context, const ref<Fbo>& target);
+    void saveScreenshot(const ref<Fbo>& target);
+    LitPreview mLitPreview;
+    LitPreviewSettings mLitSettings;
+    std::string mScreenshotPath = "capture.png";
+    bool mCaptureAndExit = false;
     bool mRequestScreenshot = false;
 
     // Window resize functionality
@@ -306,3 +314,5 @@ private:
     uint32_t mDesiredWindowWidth = 1920;
     uint32_t mDesiredWindowHeight = 1080;
 };
+
+int runScreenshot(int argc, char** argv);

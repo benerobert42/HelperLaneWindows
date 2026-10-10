@@ -55,6 +55,9 @@ std::string getVolumeGeometryName(uint32_t type)
         return "Clustered Wave Patch";
     case 7:
         return "OBJ File";
+    case 8: return "Suzanne";
+    case 9: return "Bunny";
+    case 10: return "Teapot";
     case 0:
     default:
         return "Sphere";
@@ -63,7 +66,7 @@ std::string getVolumeGeometryName(uint32_t type)
 
 bool isObjVolumeGeometry(uint32_t type)
 {
-    return type == 7;
+    return type >= 7 && type <= 10;
 }
 
 bool isOpenPatchVolumeGeometry(uint32_t type)
@@ -212,7 +215,8 @@ float4x4 makeVolumeViewProj(
     uint32_t gridLayers,
     bool use3DGrid,
     float gridSpacing,
-    float boundsRadius
+    float boundsRadius,
+    float3* cameraPosition
 )
 {
     width = std::max(width, 1u);
@@ -228,6 +232,7 @@ float4x4 makeVolumeViewProj(
     const float fitDistanceY = halfY / std::max(tanHalfFovY, 1e-3f);
     const float fitDistanceX = halfX / std::max(tanHalfFovX, 1e-3f);
     const float cameraDistance = std::max(2.0f, std::max(fitDistanceX, fitDistanceY) + halfZ + 0.5f);
+    if (cameraPosition) *cameraPosition = float3(0.f, 0.f, cameraDistance);
     const float farPlane = std::max(10.0f, cameraDistance + halfZ + 2.0f);
 
     const float4x4 view = math::matrixFromLookAt(
