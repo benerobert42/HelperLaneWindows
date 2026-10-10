@@ -1,5 +1,5 @@
-#include "SVGLoader.h"
-#include "TriangulationHelpers.h"
+#include "Import/SVGLoader.h"
+#include "Triangulation/2D/TriangulationHelpers.h"
 #include "Falcor.h"
 
 #include <algorithm>

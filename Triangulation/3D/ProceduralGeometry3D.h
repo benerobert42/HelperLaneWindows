@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Triangulation3D.h"
+#include "Triangulation/3D/Triangulation3D.h"
 
 #include "Falcor.h"
 

@@ -37,6 +37,8 @@ struct TriangulationOptions
 {
     Method method = Method::ConstrainedDelaunay;
     bool use3DEdgeLengthForGreedy = true;
+    // Explicit opt-in; existing CDTFlip/LMT ordering remains projected 2D by default.
+    bool use3DEdgeLengthForFlips = false;
     uint32_t pclMaximumNearestNeighbors = 100;
     float pclMu = 2.5f;
     float pclSearchRadius = 0.0f;
@@ -55,6 +57,8 @@ struct ProjectionFrame
 struct Patch
 {
     std::vector<uint32_t> faceIndices;
+    // Canonical source-triangle IDs also cover fragments of a curved seed face.
+    std::vector<uint32_t> sourceTriangleIndices;
     std::vector<uint32_t> vertexIndices;
     std::vector<std::pair<uint32_t, uint32_t>> boundaryEdges;
     std::vector<uint32_t> boundaryLoop;
@@ -74,12 +78,21 @@ struct PatchTriangulationResult
     std::string message;
 };
 
+enum class ResultStatus
+{
+    Failed,
+    Complete,
+    SourceFallback
+};
+
 struct MeshTriangulationResult
 {
     std::vector<Falcor::float3> vertices;
     std::vector<uint32_t> indices;
     std::vector<Patch> patches;
     std::vector<std::string> messages;
+    ResultStatus status = ResultStatus::Failed;
+    uint32_t failedPatchCount = 0;
     bool success = false;
 };
 
@@ -87,9 +100,19 @@ const char* getMethodName(Method method);
 
 std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& options = {});
 
-PatchTriangulationResult triangulatePatch(
+PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, const TriangulationOptions& options = {});
+
+// Prepared patches can be reused across methods for an unchanged source mesh.
+MeshTriangulationResult triangulatePreparedMesh(
     const Mesh& mesh,
-    const Patch& patch,
+    const std::vector<Patch>& patches,
+    const TriangulationOptions& options = {}
+);
+
+MeshTriangulationResult triangulatePreparedMesh(
+    const Mesh& mesh,
+    const MeshTriangulationResult& source,
+    const std::vector<Patch>& patches,
     const TriangulationOptions& options = {}
 );
 

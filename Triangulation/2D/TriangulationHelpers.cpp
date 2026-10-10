@@ -1,4 +1,4 @@
-#include "TriangulationHelpers.h"
+#include "Triangulation/2D/TriangulationHelpers.h"
 #include "Falcor.h"
 
 #include <include/mapbox/earcut.hpp>
@@ -1336,9 +1336,11 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
     const std::vector<Vertex>& vertices,
     std::vector<uint32_t> indices,
     int maxFlips,
-    int maxPops
+    int maxPops,
+    const std::vector<float3>* surfaceVertices
 )
 {
+    if (surfaceVertices && surfaceVertices->size() != vertices.size()) return indices;
     const int triCount = int(indices.size() / 3);
     if (triCount <= 0)
     {
@@ -1436,8 +1438,16 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
 
     std::priority_queue<Candidate, std::vector<Candidate>, CandidateLess> pq;
 
-    auto len2 = [&](uint32_t i, uint32_t j) -> float
+    auto len2 = [&](uint32_t i, uint32_t j) -> double
     {
+        if (surfaceVertices)
+        {
+            const auto& a = (*surfaceVertices)[i]; const auto& b = (*surfaceVertices)[j];
+            const double x = double(a.x) - b.x, y = double(a.y) - b.y, z = double(a.z) - b.z;
+            return std::sqrt(x*x + y*y + z*z);
+        }
+        // Historical planar score uses squared lengths; keep its ordering.
+
         const float2 diff = vertices[i].pos - vertices[j].pos;
         return dot(diff, diff);
     };

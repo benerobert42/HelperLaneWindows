@@ -1,6 +1,7 @@
-#include "ObjMeshLoader.h"
+#include "Import/ObjMeshLoader.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -11,24 +12,11 @@ namespace ObjMeshLoader
 namespace
 {
 
-float length3(const Falcor::float3& v)
+LoadResult failure(std::string message)
 {
-    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-Falcor::float3 add3(const Falcor::float3& a, const Falcor::float3& b)
-{
-    return Falcor::float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-Falcor::float3 subtract3(const Falcor::float3& a, const Falcor::float3& b)
-{
-    return Falcor::float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-Falcor::float3 multiply3(const Falcor::float3& v, float scale)
-{
-    return Falcor::float3(v.x * scale, v.y * scale, v.z * scale);
+    LoadResult result;
+    result.message = std::move(message);
+    return result;
 }
 
 std::string trim(const std::string& text)
@@ -51,31 +39,29 @@ bool parseObjPositionIndex(const std::string& token, size_t vertexCount, uint32_
         return false;
     }
 
-    int index = 0;
-    try
-    {
-        index = std::stoi(indexText);
-    }
-    catch (...)
-    {
+    int64_t index = 0;
+    const char* begin = indexText.data();
+    if (*begin == '+')
+        ++begin;
+    const auto parsed = std::from_chars(begin, indexText.data() + indexText.size(), index);
+    if (parsed.ec != std::errc{} || parsed.ptr != indexText.data() + indexText.size())
         return false;
-    }
 
     if (index > 0)
     {
-        const uint32_t zeroBased = static_cast<uint32_t>(index - 1);
-        if (zeroBased >= vertexCount)
+        const uint64_t zeroBased = static_cast<uint64_t>(index - 1);
+        if (zeroBased >= vertexCount || zeroBased > std::numeric_limits<uint32_t>::max())
         {
             return false;
         }
-        outIndex = zeroBased;
+        outIndex = static_cast<uint32_t>(zeroBased);
         return true;
     }
 
     if (index < 0)
     {
-        const int resolved = static_cast<int>(vertexCount) + index;
-        if (resolved < 0 || resolved >= static_cast<int>(vertexCount))
+        const int64_t resolved = static_cast<int64_t>(vertexCount) + index;
+        if (resolved < 0 || resolved >= static_cast<int64_t>(vertexCount))
         {
             return false;
         }
@@ -105,23 +91,20 @@ void centerAndScale(Triangulation3D::Mesh& mesh, float targetRadius)
         maxPoint.z = std::max(maxPoint.z, vertex.z);
     }
 
-    const Falcor::float3 center = multiply3(add3(minPoint, maxPoint), 0.5f);
-    float radius = 0.0f;
-    for (const Falcor::float3& vertex : mesh.vertices)
+    const double cx = 0.5 * (double(minPoint.x) + maxPoint.x);
+    const double cy = 0.5 * (double(minPoint.y) + maxPoint.y);
+    const double cz = 0.5 * (double(minPoint.z) + maxPoint.z);
+    double radius = 0;
+    for (auto p : mesh.vertices)
     {
-        radius = std::max(radius, length3(subtract3(vertex, center)));
+        double x = p.x - cx, y = p.y - cy, z = p.z - cz;
+        radius = std::max(radius, std::sqrt(x * x + y * y + z * z));
     }
-
-    if (radius <= 1e-8f)
-    {
+    if (radius <= 1e-20)
         return;
-    }
-
-    const float scale = std::max(targetRadius, 1e-6f) / radius;
-    for (Falcor::float3& vertex : mesh.vertices)
-    {
-        vertex = multiply3(subtract3(vertex, center), scale);
-    }
+    const double scale = targetRadius / radius;
+    for (auto& p : mesh.vertices)
+        p = Falcor::float3(float((p.x - cx) * scale), float((p.y - cy) * scale), float((p.z - cz) * scale));
 }
 
 } // namespace
@@ -165,25 +148,38 @@ LoadResult load(const std::string& path, const LoadOptions& options)
 
         if (keyword == "v")
         {
-            float x = 0.0f;
-            float y = 0.0f;
-            float z = 0.0f;
-            float w = 1.0f;
-            if (!(stream >> x >> y >> z))
+            std::vector<float> components;
+            std::string token;
+            while (stream >> token)
             {
-                result.warnings.push_back("Line " + std::to_string(lineNumber) + ": invalid vertex.");
-                continue;
-            }
-            if (stream >> w)
-            {
-                if (std::abs(w) > 1e-8f && std::abs(w - 1.0f) > 1e-8f)
+                const char* begin = token.data();
+                if (*begin == '+')
+                    ++begin;
+                float value = 0;
+                auto parsed = std::from_chars(begin, token.data() + token.size(), value);
+                if (parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size() || !std::isfinite(value))
                 {
-                    x /= w;
-                    y /= w;
-                    z /= w;
+                    return failure("Line " + std::to_string(lineNumber) + ": invalid vertex component.");
                 }
+                components.push_back(value);
             }
-            result.mesh.vertices.push_back(Falcor::float3(x, y, z));
+            // Six/seven components are the common vertex-color extension;
+            // colors are ignored by this position-only importer.
+            if (components.size() != 3 && components.size() != 4 && components.size() != 6 && components.size() != 7)
+            {
+                return failure("Line " + std::to_string(lineNumber) + ": invalid vertex component count.");
+            }
+            const float w = components.size() == 4 || components.size() == 7 ? components[3] : 1;
+            if (std::abs(w) <= 1e-8f)
+            {
+                return failure("Line " + std::to_string(lineNumber) + ": zero homogeneous weight.");
+            }
+            auto position = Falcor::float3(components[0] / w, components[1] / w, components[2] / w);
+            if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+            {
+                return failure("Line " + std::to_string(lineNumber) + ": homogeneous vertex overflow.");
+            }
+            result.mesh.vertices.push_back(position);
         }
         else if (keyword == "f")
         {
@@ -194,34 +190,36 @@ LoadResult load(const std::string& path, const LoadOptions& options)
                 uint32_t vertexIndex = 0;
                 if (!parseObjPositionIndex(token, result.mesh.vertices.size(), vertexIndex))
                 {
-                    result.warnings.push_back("Line " + std::to_string(lineNumber) + ": invalid face index '" + token + "'.");
-                    face.clear();
-                    break;
+                    return failure("Line " + std::to_string(lineNumber) + ": invalid face index '" + token + "'.");
                 }
                 face.push_back(vertexIndex);
             }
 
             if (face.size() < 3)
             {
-                if (!face.empty())
-                {
-                    result.warnings.push_back("Line " + std::to_string(lineNumber) + ": skipped face with fewer than three vertices.");
-                }
-                continue;
+                return failure("Line " + std::to_string(lineNumber) + ": face has fewer than three vertices.");
             }
 
             ++result.sourceFaceCount;
             result.sourceTriangleCount += static_cast<uint32_t>(face.size() - 2);
             if (face.size() > 3)
             {
-                ++result.fanTriangulatedFaceCount;
+                ++result.polygonFaceCount;
             }
             result.mesh.faces.push_back(std::move(face));
         }
     }
 
+    if (file.bad())
+    {
+        return failure("Failed while reading OBJ: " + path);
+    }
     if (options.centerAndScale)
     {
+        if (!(options.targetRadius > 0 && std::isfinite(options.targetRadius)))
+        {
+            return failure("Invalid OBJ normalization radius.");
+        }
         centerAndScale(result.mesh, options.targetRadius);
     }
 
@@ -233,7 +231,7 @@ LoadResult load(const std::string& path, const LoadOptions& options)
     }
     else
     {
-        result.message = "OBJ did not contain usable vertices and faces.";
+        return failure("OBJ did not contain usable vertices and faces.");
     }
 
     return result;

@@ -1,4 +1,4 @@
-#include "ProceduralGeometry3D.h"
+#include "Triangulation/3D/ProceduralGeometry3D.h"
 
 #include <algorithm>
 #include <cmath>

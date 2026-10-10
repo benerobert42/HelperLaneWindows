@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ShaderTypes.h"
+#include "Triangulation/ShaderTypes.h"
 #include "Falcor.h"
 
 #include <functional>

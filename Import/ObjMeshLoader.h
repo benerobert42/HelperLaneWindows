@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Triangulation3D.h"
+#include "Triangulation/3D/Triangulation3D.h"
 
 #include "Falcor.h"
 
@@ -22,7 +22,7 @@ struct LoadResult
     Triangulation3D::Mesh mesh;
     uint32_t sourceFaceCount = 0;
     uint32_t sourceTriangleCount = 0;
-    uint32_t fanTriangulatedFaceCount = 0;
+    uint32_t polygonFaceCount = 0;
     bool success = false;
     std::string message;
     std::vector<std::string> warnings;

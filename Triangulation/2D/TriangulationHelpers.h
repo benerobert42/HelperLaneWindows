@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ShaderTypes.h"
+#include "Triangulation/ShaderTypes.h"
 #include "Falcor.h"
 
 #include <vector>
@@ -54,7 +54,8 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
     const std::vector<Vertex>& vertices,
     std::vector<uint32_t> indices,
     int maxFlips = -1,
-    int maxPops = -1
+    int maxPops = -1,
+    const std::vector<float3>* surfaceVertices = nullptr
 );
 
 // Create vertices for an ellipse
