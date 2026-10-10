@@ -109,7 +109,6 @@ float4 psMain(V2P input) : SV_Target
 #endif
 #if VIZ_MODE == 0
     uint isHelperLane = IsHelperLane() ? 1u : 0u;
-    isHelperLane ^= (dummy > -1.0f ? 0u : 0u); // prevents dead-code elimination
     uint sum =
         QuadReadLaneAt(isHelperLane, 0) +
         QuadReadLaneAt(isHelperLane, 1) +
@@ -130,8 +129,9 @@ float4 psMain(V2P input) : SV_Target
          m = min(m, QuadReadAcrossDiagonal(candidate));
 
     if (m < 4u && candidate == m) InterlockedAdd(gHelperLaneCounter[0], sum);
+    if (!IsHelperLane()) InterlockedAdd(gHelperLaneCounter[uint2(1, 0)], 1);
 #endif
-    return kColors[clamp(sum, 0u, 3u)];
+    return kColors[clamp(sum, 0u, 3u)] + float4(dummy * 0.001, 0, 0, 0); // Real output dependency keeps the optional sample.
 #elif VIZ_MODE == 1
     return float4(0, 0, 0, 1);
 #elif VIZ_MODE == 2
