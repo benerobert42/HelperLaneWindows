@@ -77,8 +77,7 @@ int runScreenshot(int argc, char** argv)
         if (app.mVolumeTriangulationType > 5) throw std::runtime_error("Method must be 0..5 (3 = Source Faces)");
         const std::map<std::string, HelperLaneViz::VizMode> modes{
             {"lit", HelperLaneViz::VizMode::LitPreview}, {"wireframe", HelperLaneViz::VizMode::Wireframe},
-            {"helpers", HelperLaneViz::VizMode::HelperLanes}, {"texture", HelperLaneViz::VizMode::Texture},
-            {"stress", HelperLaneViz::VizMode::MaterialStress}};
+            {"helpers", HelperLaneViz::VizMode::HelperLanes}};
         app.mVizMode = modes.at(recipe.value("visualization", "lit"));
         const float3 rotation = readVector(recipe.value("rotation", Json::array({0.f, 0.f, 0.f})));
         app.mVolumeModelTransform = mul(math::matrixFromRotationZ(math::radians(rotation.z)),

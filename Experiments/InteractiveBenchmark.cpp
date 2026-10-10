@@ -191,7 +191,7 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
         // Restore original VizMode
         mVizMode = mSavedVizMode;
 
-        mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+        mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
 
         const auto statistics = BenchmarkSupport::summarize(mPlanarBenchmark.gpuTimes);
         const double median = statistics.median, mean = statistics.mean, stddev = statistics.standardDeviation;
@@ -231,7 +231,7 @@ void HelperLaneViz::processBenchmarkStep(RenderContext* pRenderContext)
                 << stddev << "," << helperCount << "," << uniqueEdgeLength;
         }
         oss << "," << cntMSAA << "," << mGridCols << "," << mGridRows << ","
-            << (mSavedVizMode == VizMode::MaterialStress ? "SyntheticWave8" : "Texture1");
+            << "FlatRaster";
         std::string logLine = oss.str();
 
         mBenchmarkLog.push_back(logLine);
@@ -380,7 +380,7 @@ void HelperLaneViz::writeVolumeBenchmarkRow(
                    << minMedianGpuMs << "," << maxMedianGpuMs << "," << totalEdgeLength3D << "," << averageProjectedEdgeLength << ","
                    << averageHelperLaneCount << "," << mVolumeBenchmark.cpuTimeMs << "," << mVolumeFailedPatchCount << ","
                    << mVolumeResultValid << "," << mVolumeReferenceError << "," << cntMSAA << "," << getTargetFbo()->getWidth() << ","
-                   << getTargetFbo()->getHeight() << "," << (mSavedVizMode == VizMode::MaterialStress ? "SyntheticWave8" : "Texture1")
+                   << getTargetFbo()->getHeight() << "," << "FlatRaster"
                    << "," << mBenchmarkConfigSnapshot.volumeSamples << "," << mVolumeBenchmark.visibleOrientations << ","
                    << (mVolumeResultValid && mVolumeBenchmark.visibleOrientations == mBenchmarkConfigSnapshot.orientations) << ","
                    << mVolumeSurfaceLocalFlips << "\n";
@@ -405,7 +405,7 @@ void HelperLaneViz::writeVolumeBenchmarkDetails()
                 << row.projectedEdgeLength << "," << row.helperLaneCount << "," << row.cpuMs << "," << row.edgeLength3D << ","
                 << row.failedPatches << "," << row.valid << "," << row.referenceError << "," << row.samples << "," << cntMSAA << ","
                 << getTargetFbo()->getWidth() << "," << getTargetFbo()->getHeight() << ","
-                << (mSavedVizMode == VizMode::MaterialStress ? "SyntheticWave8" : "Texture1") << "," << row.activeLanes << ","
+                << "FlatRaster" << "," << row.activeLanes << ","
                 << (row.valid && row.activeLanes > 0) << "," << mVolumeSurfaceLocalFlips << "\n";
     details.flush();
 }
@@ -539,7 +539,7 @@ void HelperLaneViz::processVolumeBenchmarkStep(RenderContext* pRenderContext)
         mVizMode = mSavedVizMode;
         mReadBackHelperLaneCount = false;
 
-        mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+        mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
 
         mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
 
@@ -640,9 +640,8 @@ void HelperLaneViz::beginBenchmarkSession()
         mVolumeModelTransform
     };
     mReadBackHelperLaneCount = false;
-    if (mVizMode == VizMode::HelperLanes || mVizMode == VizMode::Wireframe)
-        mVizMode = VizMode::Texture;
-    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+    mVizMode = VizMode::Benchmark;
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
     mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
     mLastDrawMs = std::numeric_limits<double>::quiet_NaN();
     mBenchmarkFile.exceptions(std::ios::failbit | std::ios::badbit);
@@ -675,7 +674,7 @@ void HelperLaneViz::finishBenchmarkSession(const std::string& message)
     mEllipseRadiusY = saved.ellipseY;
     mSvgPath = std::move(saved.svgPath);
     mVolumeModelTransform = saved.model;
-    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode)));
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
     mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", mReadBackHelperLaneCount ? "1" : "0");
     if (mGeometryDimensionality == GeometryDimensionality::Volumetric)
         generateVolumeGeometry();
@@ -701,7 +700,7 @@ void HelperLaneViz::writeBenchmarkMetadata(const std::string& output)
          << "\nSource revision: " << HELPERLANE_GIT_REVISION << "\nCompiled source digest: " << HELPERLANE_SOURCE_DIGEST
          << "\nGPU: " << getDevice()->getInfo().adapterName << "\nAPI: " << getDevice()->getInfo().apiName << "\nMSAA: " << cntMSAA
          << "\nResolution: " << getTargetFbo()->getWidth() << 'x' << getTargetFbo()->getHeight()
-         << "\nTimed shader: " << (mVizMode == VizMode::MaterialStress ? "SyntheticWave8" : "Texture1")
+         << "\nTimed shader: " << "FlatRaster"
          << "\nDepth: Less, writes enabled, matching D32Float MSAA\nGeometry: " << mVolumeGeometryName
          << "\nSegments: " << mVolumeLatitudeSegments << ',' << mVolumeLongitudeSegments << "\nRadius: " << mVolumeRadius
          << "\nOBJ: " << mVolumeObjPath << "\nNormalize OBJ: " << mVolumeNormalizeObj

@@ -92,5 +92,6 @@ void LitPreview::draw(RenderContext* context, const ref<Fbo>& target,
     lighting["attenuationCoefficients"] = s.attenuation;
     mpState->setFbo(target);
     mpState->setVao(mpVao);
+    FALCOR_PROFILE(context, "MeshDraw");
     context->drawIndexedInstanced(mpState.get(), mpVars.get(), indexCount, grid.instanceCount, 0, 0, 0);
 }

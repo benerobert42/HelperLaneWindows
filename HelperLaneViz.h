@@ -56,7 +56,7 @@ public:
     bool onMouseEvent(const MouseEvent& mouseEvent) override;
 
 private:
-    // === NEW: graphics objects
+    // Graphics objects
     ref<Program> mpProgram;
     ref<GraphicsState> mpState;
     ref<ProgramVars> mpVars;
@@ -69,7 +69,6 @@ private:
     ref<GpuTimer> mpDrawTimer;
     double mLastDrawMs = 0;
     ref<Texture> mpHelperLaneCounter;
-    ref<Texture> mpDummyTexture;
     ref<RasterizerState> defaultRsState;
     ref<RasterizerState> wireframeRsState;
 
@@ -92,13 +91,13 @@ private:
         Volumetric = 1
     };
 
-    GeometryDimensionality mGeometryDimensionality = GeometryDimensionality::Planar;
-    bool mUseCircle = false;
+    GeometryDimensionality mGeometryDimensionality = GeometryDimensionality::Volumetric;
+    bool mUseCircle = true;
     uint32_t mCircleVertexCount = 32;
     float mEllipseRadiusX = 0.4f;
     float mEllipseRadiusY = 0.4f;
     uint32_t mVolumeGeometryType = 0;
-    uint32_t mVolumeTriangulationType = 0;
+    uint32_t mVolumeTriangulationType = 3;
     uint32_t mVolumeTargetVertexCount = 512;
     uint32_t mVolumeLatitudeSegments = 31;
     uint32_t mVolumeLongitudeSegments = 17;
@@ -155,9 +154,6 @@ private:
     float2 mGridOrigin = float2(0.0f, 0.0f);
     float mGridScale = 1.0f;
 
-    bool mUseDummyTexture = false;
-
-    bool mMeasureTriangulationTime = false;
     double mLastTriangulationMs = 0.0;
 
     // Mesh optimization (meshoptimizer)
@@ -168,8 +164,7 @@ private:
     {
         HelperLanes = 0,
         Wireframe = 1,
-        Texture = 2,
-        MaterialStress = 3,
+        Benchmark = 2, // Internal flat raster workload; not a selectable view.
         LitPreview = 4
     };
 
@@ -309,10 +304,7 @@ private:
     bool mCaptureAndExit = false;
     bool mRequestScreenshot = false;
 
-    // Window resize functionality
-    void resizeWindow(uint32_t width, uint32_t height);
-    uint32_t mDesiredWindowWidth = 1920;
-    uint32_t mDesiredWindowHeight = 1080;
+    bool mUiLayoutInitialized = false;
 };
 
 int runScreenshot(int argc, char** argv);

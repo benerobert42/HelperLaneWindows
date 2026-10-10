@@ -4,10 +4,6 @@
 #define READ_BACK_HELPER_LANE_COUNT 0
 #endif
 
-#ifndef USE_DUMMY_TEXTURE
-#define USE_DUMMY_TEXTURE 0
-#endif
-
 #ifndef VIZ_MODE
 #define VIZ_MODE 0
 #endif
@@ -57,8 +53,6 @@ cbuffer VolumeGrid
 };
 
 RWTexture2D<uint> gHelperLaneCounter;
-Texture2D<float4> gDummyTexture;
-SamplerState gDummySampler;
 
 V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 {
@@ -101,12 +95,6 @@ V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
 
 float4 psMain(V2P input) : SV_Target
 {
-    float dummy = 0.0;
-#if (VIZ_MODE == 0) && USE_DUMMY_TEXTURE
-    uint lane = WaveGetLaneIndex();
-    float2 uv = frac(float2(lane * 0.37, lane * 0.73));
-    dummy = gDummyTexture.Sample(gDummySampler, uv).r;
-#endif
 #if VIZ_MODE == 0
     uint isHelperLane = IsHelperLane() ? 1u : 0u;
     uint sum =
@@ -131,24 +119,11 @@ float4 psMain(V2P input) : SV_Target
     if (m < 4u && candidate == m) InterlockedAdd(gHelperLaneCounter[0], sum);
     if (!IsHelperLane()) InterlockedAdd(gHelperLaneCounter[uint2(1, 0)], 1);
 #endif
-    return kColors[clamp(sum, 0u, 3u)] + float4(dummy * 0.001, 0, 0, 0); // Real output dependency keeps the optional sample.
+    return kColors[clamp(sum, 0u, 3u)];
 #elif VIZ_MODE == 1
     return float4(0, 0, 0, 1);
-#elif VIZ_MODE == 2
-    return gDummyTexture.Sample(gDummySampler, input.pos.xy * 0.5 + 0.5);
 #else
-    uint lane = WaveGetLaneIndex();
-    float2 uv = frac(input.pos.xy * 0.0025 + float2(lane * 0.031, lane * 0.047));
-    float4 color = float4(0.0, 0.0, 0.0, 0.0);
-    [unroll]
-    for (uint i = 0; i < 8; ++i)
-    {
-        float fi = float(i);
-        float2 offset = float2(sin(fi * 2.17 + lane * 0.13), cos(fi * 1.71 + lane * 0.19)) * 0.015;
-        color += gDummyTexture.Sample(gDummySampler, frac(uv + offset));
-    }
-    color *= 0.125;
-    float waveMix = (WaveActiveSum(color.r) + WaveActiveSum(color.g) + WaveActiveSum(color.b)) / 96.0;
-    return float4(saturate(color.rgb * 0.75 + float3(waveMix, waveMix, waveMix)), 1.0);
+    // Internal benchmark workload: opaque flat rasterization, no diagnostics.
+    return float4(1, 1, 1, 1);
 #endif
 }

@@ -39,6 +39,7 @@
 
 #include "Falcor.h"
 #include "Core/Program/ProgramManager.h"
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <chrono>
@@ -62,11 +63,6 @@
 using namespace Falcor;
 
 FALCOR_EXPORT_D3D12_AGILITY_SDK
-
-uint32_t mSampleGuiWidth = 250;
-uint32_t mSampleGuiHeight = 200;
-uint32_t mSampleGuiPositionX = 20;
-uint32_t mSampleGuiPositionY = 40;
 
 HelperLaneViz::HelperLaneViz(const SampleAppConfig& config) : SampleApp(config) {}
 HelperLaneViz::~HelperLaneViz() {}
@@ -129,7 +125,11 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     mpLayout3D->addBufferLayout(0, pVbLayout3D);
 
     mSvgPath = "Path to your SVG file";
-    loadSvg(mSvgPath);
+    if (mGeometryDimensionality == GeometryDimensionality::Planar)
+    {
+        if (mUseCircle) generateCircle();
+        else loadSvg(mSvgPath);
+    }
     generateVolumeGeometry();
     if (mCaptureAndExit && !mVolumeResultValid)
         throw std::runtime_error("Screenshot requires a valid triangulation: " + mVolumeObjStatus);
@@ -144,22 +144,6 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
         2, 1, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
     );
     mpVars->setTexture("gHelperLaneCounter", mpHelperLaneCounter);
-
-    uint32_t texWidth = 2048;
-    uint32_t texHeight = 2048;
-    std::vector<uint32_t> pixels(texWidth * texHeight);
-    uint32_t noise = 173;
-    for (auto& pixel : pixels)
-    {
-        noise = noise * 1664525u + 1013904223u;
-        pixel = 0xff000000u | (noise & 0x00ffffffu);
-    }
-    mpDummyTexture = getDevice()->createTexture2D(
-        texWidth, texHeight, ResourceFormat::RGBA8Unorm, 1, 1, pixels.data(), ResourceBindFlags::ShaderResource
-    );
-
-    mpVars->setTexture("gDummyTexture", mpDummyTexture);
-    mpVars->getRootVar()["gDummySampler"] = make_ref<Sampler>(getDevice(), Sampler::Desc());
 
     // MSAA render target
     CreateMSAATargets();
@@ -217,11 +201,7 @@ void HelperLaneViz::loadSvg(const std::string& path)
         uploadGeometry();
     }
 
-    if (mMeasureTriangulationTime)
-    {
-        auto end = std::chrono::high_resolution_clock::now();
-        mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
-    }
+    mLastTriangulationMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count();
 }
 
 void HelperLaneViz::generateCircle()
@@ -273,11 +253,7 @@ void HelperLaneViz::generateCircle()
         break;
     }
 
-    if (mMeasureTriangulationTime)
-    {
-        auto end = std::chrono::high_resolution_clock::now();
-        mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
-    }
+    mLastTriangulationMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count();
 
     if (mUseMeshOptimizer)
     {
@@ -450,7 +426,7 @@ void HelperLaneViz::generateVolumeGeometry()
     std::ostringstream patchKey;
     patchKey << std::setprecision(9) << mVolumeMaxNormalDeviationDegrees << ':' << mVolumeMaxRelativePlaneDeviation << ':'
              << mVolumeMaxFacesPerPatch;
-    if (patchKey.str() != mVolumePatchKey)
+    if (mVolumeTriangulationType != 3 && patchKey.str() != mVolumePatchKey)
     {
         mVolumeCachedPatches = Triangulation3D::growPatches(sourceMesh, patchOptions);
         mVolumePatchKey = patchKey.str();
@@ -498,11 +474,7 @@ void HelperLaneViz::generateVolumeGeometry()
     updateVolumeGridParams();
     updateCameraParams();
 
-    if (mMeasureTriangulationTime)
-    {
-        auto end = std::chrono::high_resolution_clock::now();
-        mLastTriangulationMs = std::chrono::duration<double, std::milli>(end - start).count();
-    }
+    mLastTriangulationMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count();
 
     if (mGeometryDimensionality == GeometryDimensionality::Volumetric)
     {
@@ -711,7 +683,7 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
             mpState->setFbo(pTargetFbo);
         }
 
-        if (mpHelperLaneCounter)
+        if (mpHelperLaneCounter && mReadBackHelperLaneCount && mVizMode == VizMode::HelperLanes)
         {
             pRenderContext->clearUAV(mpHelperLaneCounter->getUAV().get(), uint4(0));
         }
@@ -733,7 +705,13 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
                 mpDrawTimer->begin();
             uint32_t instanceCount =
                 mGeometryDimensionality == GeometryDimensionality::Volumetric ? std::max(mVolumeInstanceCount, 1u) : mGridCols * mGridRows;
-            pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
+            if (timeDraw)
+                pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
+            else
+            {
+                FALCOR_PROFILE(pRenderContext, "MeshDraw");
+                pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
+            }
             if (timeDraw)
             {
                 mpDrawTimer->end();
@@ -743,8 +721,9 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
             }
         }
 
-        if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount)
+        if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount && mVizMode == VizMode::HelperLanes)
         {
+            FALCOR_PROFILE(pRenderContext, "HelperReadback");
             std::vector<uint8_t> counterData = pRenderContext->readTextureSubresource(mpHelperLaneCounter->asTexture().get(), 0);
             mHelperLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[0];
             mActiveLaneCount = reinterpret_cast<const uint32_t*>(counterData.data())[1];
@@ -754,6 +733,7 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 
     if (cntMSAA > 1)
     {
+        FALCOR_PROFILE(pRenderContext, "ResolveMSAA");
         pRenderContext->resolveResource(mpFbo->getColorTexture(0), mpResolvedTexture);
         pRenderContext->blit(mpResolvedTexture->getSRV(), pTargetFbo->getRenderTargetView(0));
     }
@@ -769,309 +749,180 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 
 void HelperLaneViz::onGuiRender(Gui* pGui)
 {
-    Gui::Window w(pGui, "Helper Lane Sample", {300, 150});
+    const uint32_t width = std::min(680u, std::max(320u, getTargetFbo()->getWidth() * 2u / 5u));
+    const uint32_t height = std::max(320u, getTargetFbo()->getHeight());
+    const uint32_t controlsHeight = height * 3u / 5u;
+    const uint32_t profilerY = 16u + controlsHeight + 12u;
+    const auto flags = Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::AllowMove;
+    if (!mUiLayoutInitialized)
+    {
+        // Establish this sample's default for Falcor's existing profiler window.
+        // SampleApp renders its contents later in the same UI frame.
+        Gui::Window profiler(pGui, "Profiler", {width, height - profilerY - 16u}, {16u, profilerY}, flags);
+        profiler.windowPos(16u, profilerY);
+        profiler.windowSize(width, height - profilerY - 16u);
+    }
+    Gui::Window w(pGui, "Helper Lane Sample", {width, controlsHeight}, {16, 16}, flags);
+    if (!mUiLayoutInitialized)
+    {
+        w.windowPos(16, 16);
+        w.windowSize(width, controlsHeight);
+        mUiLayoutInitialized = true;
+    }
     if (benchmarkRunning())
     {
         w.text("Benchmark running; configuration is locked.");
-        w.text("GPU timing: isolated draw. Diagnostics run separately.");
-        if (w.button("Cancel Benchmark"))
-            finishBenchmarkSession("Benchmark cancelled.");
+        w.text("GPU timing: flat raster draw; diagnostics run separately.");
+        if (w.button("Cancel Benchmark")) finishBenchmarkSession("Benchmark cancelled.");
         return;
     }
 
-    // Display GPU frametime
-    Profiler* pProfiler = getDevice()->getProfiler();
-    if (pProfiler && pProfiler->isEnabled())
+    auto* profiler = getDevice()->getProfiler();
+    if (profiler && profiler->isEnabled())
     {
-        const auto& events = pProfiler->getEvents();
-        for (auto* pEvent : events)
+        for (auto* event : profiler->getEvents())
         {
-            if (pEvent->getName() == "/onFrameRender")
-            {
-                float gpuTime = pEvent->getGpuTime(); // in milliseconds
-                w.text("GPU Frame Time: %.2f ms", gpuTime);
-                break;
-            }
+            if (event->getName() == "/onFrameRender")
+                w.text(fmt::format("Render callback GPU: {:.3f} ms EMA (last {:.3f})", event->getGpuTimeAverage(), event->getGpuTime()));
+            else if (event->getName() == "/onFrameRender/MeshDraw")
+                w.text(fmt::format("Mesh draw GPU: {:.3f} ms EMA (last {:.3f})", event->getGpuTimeAverage(), event->getGpuTime()));
         }
     }
-
-    // MSAA
-    Gui::DropdownList msaaTypes = {{1, "None"}, {2, "2x"}, {4, "4x"}, {8, "8x"}, {16, "16x"}};
-    bool msaaChanged = w.dropdown("MSAA", msaaTypes, cntMSAA);
-    if (msaaChanged && cntMSAA > 1u)
-        CreateMSAATargets();
-
-    Gui::DropdownList dimensionalityTypes = {{0, "Planar"}, {1, "Volumetric"}};
-    uint32_t dimensionality = static_cast<uint32_t>(mGeometryDimensionality);
-    bool dimensionalityChanged = w.dropdown("Dimensionality", dimensionalityTypes, dimensionality);
-    if (dimensionalityChanged)
-    {
-        mGeometryDimensionality = static_cast<GeometryDimensionality>(dimensionality);
-    }
-    const bool isVolumetric = mGeometryDimensionality == GeometryDimensionality::Volumetric;
-
-    bool modeChanged = false;
-    if (!isVolumetric)
-    {
-        modeChanged = w.checkbox("Use Circle", mUseCircle);
-    }
-
-    // Visualization mode
-    Gui::DropdownList vizModes = {{0, "Helper Lanes"}, {1, "Wireframe"}, {2, "Texture"}, {3, "Synthetic Wave + 8 samples"}};
-    if (isVolumetric) vizModes.push_back({4, "Lit Preview (GraphEx Raster)"});
-    else if (mVizMode == VizMode::LitPreview) mVizMode = VizMode::HelperLanes;
-    w.dropdown("Visualization", vizModes, *(uint32_t*)&mVizMode);
-    if (mVizMode == VizMode::LitPreview) mLitSettings.drawGui(w);
-
-    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
-    mpProgram->addDefine("USE_3D_GEOMETRY", isVolumetric ? "1" : "0");
-    if (dimensionalityChanged)
-        updateCameraParams();
-
-    if (mVizMode == VizMode::Texture || mVizMode == VizMode::MaterialStress || (mVizMode == VizMode::HelperLanes && mUseDummyTexture))
-    {
-        mpVars->setTexture("gDummyTexture", mpDummyTexture);
-    }
-
-    mpProgram->addDefine("USE_DUMMY_TEXTURE", mVizMode == VizMode::HelperLanes && mUseDummyTexture ? "1" : "0");
-
+    w.text(fmt::format("Last geometry rebuild CPU: {:.3f} ms", mLastTriangulationMs));
     w.separator();
 
-    if (mVizMode != VizMode::LitPreview)
+    uint32_t dimensionality = uint32_t(mGeometryDimensionality);
+    const bool dimensionalityChanged = w.dropdown("Dimensionality", {{0, "Planar"}, {1, "Volumetric"}}, dimensionality);
+    mGeometryDimensionality = GeometryDimensionality(dimensionality);
+    const bool volumetric = mGeometryDimensionality == GeometryDimensionality::Volumetric;
+    Gui::DropdownList views{{0, "Helper Lanes"}, {1, "Wireframe"}};
+    if (volumetric) views.push_back({4, "Lit Preview (GraphEx Raster)"});
+    else if (mVizMode == VizMode::LitPreview) mVizMode = VizMode::HelperLanes;
+    uint32_t view = uint32_t(mVizMode);
+    w.dropdown("Visualization", views, view);
+    mVizMode = VizMode(view);
+    mpProgram->addDefine("VIZ_MODE", std::to_string(uint32_t(mVizMode == VizMode::LitPreview ? VizMode::HelperLanes : mVizMode)));
+    mpProgram->addDefine("USE_3D_GEOMETRY", volumetric ? "1" : "0");
+    if (w.dropdown("MSAA", {{1, "None"}, {2, "2x"}, {4, "4x"}, {8, "8x"}}, cntMSAA) && cntMSAA > 1) CreateMSAATargets();
+    if (mVizMode == VizMode::HelperLanes)
     {
-        w.checkbox("Read back helper lane count", mReadBackHelperLaneCount);
-
+        w.checkbox("Read helper counters (synchronous)", mReadBackHelperLaneCount);
         if (mReadBackHelperLaneCount)
         {
-            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "1");
-            std::string helperLaneCountStr = "Helper lane count: " + std::to_string(mHelperLaneCount);
-            w.text(helperLaneCountStr);
+            w.text(fmt::format("Helpers: {}   Active lanes: {}", mHelperLaneCount, mActiveLaneCount));
+            w.text("Counter atomics and readback affect GPU timing.");
         }
-        else
-        {
-            mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", "0");
-        }
-
-        w.checkbox("Bind dummy texture (force helper lanes)", mUseDummyTexture);
-
-        if (mUseDummyTexture)
-        {
-            mpProgram->addDefine("USE_DUMMY_TEXTURE", "1");
-            mpVars->setTexture("gDummyTexture", mpDummyTexture);
-        }
-
     }
-
-    w.checkbox("Measure triangulation time", mMeasureTriangulationTime);
-
-    if (mMeasureTriangulationTime)
-    {
-        w.text("Last triangulation: %.3f ms", mLastTriangulationMs);
-    }
-
+    mpProgram->addDefine("READ_BACK_HELPER_LANE_COUNT", mReadBackHelperLaneCount && mVizMode == VizMode::HelperLanes ? "1" : "0");
     w.separator();
 
-    if (isVolumetric)
+    if (volumetric)
     {
-        Gui::DropdownList volumeGeometryTypes = {
-            {0, "Sphere"},
-            {1, "Anisotropic Ellipsoid"},
-            {2, "Jittered Sphere"},
-            {3, "Lumpy Ellipsoid"},
-            {4, "Saddle Stress Patch"},
-            {5, "Folded Sheet"},
-            {6, "Clustered Wave Patch"},
-            {7, "OBJ File"},
-            {8, "Suzanne (OBJ)"},
-            {9, "Bunny (OBJ)"},
-            {10, "Teapot (OBJ)"}
-        };
-        bool geometryChanged = w.dropdown("Volume Geometry", volumeGeometryTypes, mVolumeGeometryType);
-        if (geometryChanged)
+        bool changed = w.dropdown("Volume Geometry", {
+            {0, "Sphere"}, {1, "Anisotropic Ellipsoid"}, {2, "Jittered Sphere"}, {3, "Lumpy Ellipsoid"},
+            {4, "Saddle Stress Patch"}, {5, "Folded Sheet"}, {6, "Clustered Wave Patch"}, {7, "OBJ File"},
+            {8, "Suzanne (OBJ)"}, {9, "Bunny (OBJ)"}, {10, "Teapot (OBJ)"}}, mVolumeGeometryType);
+        if (changed)
         {
-            if (isObjVolumeGeometry(mVolumeGeometryType))
-            {
-                mVolumeTriangulationType = 3;
-            }
-            else
-            {
-                applyVolumeTargetVertexCount();
-            }
+            if (isObjVolumeGeometry(mVolumeGeometryType)) mVolumeTriangulationType = 3;
+            else applyVolumeTargetVertexCount();
         }
-        bool volumeChanged = geometryChanged;
-
-        Gui::DropdownList volumeTriangTypes = {
-            {3, "Source Faces"},
-            {0, "CDT"},
-            {1, "CDT + Flip"},
-            {2, "Greedy Point Set"},
-            {4, "LMT Heuristic"},
-            {5, "Custom Greedy Projection"}
-        };
-        volumeChanged |= w.dropdown("Volumetric Triangulation", volumeTriangTypes, mVolumeTriangulationType);
-        volumeChanged |= w.checkbox("Use 3D length for local flips", mVolumeSurfaceLocalFlips);
-
+        changed |= w.dropdown("Volumetric Triangulation", {
+            {3, "Source Faces"}, {0, "CDT"}, {1, "CDT + Flip"}, {2, "Greedy Point Set"},
+            {4, "LMT (experimental)"}, {5, "Greedy Projection (experimental)"}}, mVolumeTriangulationType);
         if (isObjVolumeGeometry(mVolumeGeometryType))
         {
-            if (mVolumeGeometryType == 7) volumeChanged |= w.textbox("OBJ Path", mVolumeObjPath);
-            volumeChanged |= w.checkbox("Normalize OBJ to Scale", mVolumeNormalizeObj);
+            if (mVolumeGeometryType == 7) changed |= w.textbox("OBJ Path", mVolumeObjPath);
+            changed |= w.checkbox("Normalize OBJ to Scale", mVolumeNormalizeObj);
         }
         else
         {
-            bool targetVertexCountChanged = w.var("Target Source Vertices", mVolumeTargetVertexCount, 9u, 16384u);
-            if (targetVertexCountChanged)
+            if (w.var("Target Source Vertices", mVolumeTargetVertexCount, 9u, 16384u))
             {
                 applyVolumeTargetVertexCount();
-                volumeChanged = true;
+                changed = true;
             }
-            bool segmentChanged = false;
-            segmentChanged |= w.var("Latitude/U Segments", mVolumeLatitudeSegments, 3u, 128u);
-            segmentChanged |= w.var("Longitude/V Segments", mVolumeLongitudeSegments, 3u, 128u);
-            if (segmentChanged)
+            if (auto resolution = w.group("Segment counts"))
             {
-                mVolumeTargetVertexCount =
-                    estimateVolumeSourceVertexCount(mVolumeGeometryType, mVolumeLatitudeSegments, mVolumeLongitudeSegments);
-                volumeChanged = true;
+                bool segments = resolution.var("Latitude/U", mVolumeLatitudeSegments, 3u, 128u);
+                segments |= resolution.var("Longitude/V", mVolumeLongitudeSegments, 3u, 128u);
+                if (segments)
+                {
+                    mVolumeTargetVertexCount = estimateVolumeSourceVertexCount(mVolumeGeometryType, mVolumeLatitudeSegments, mVolumeLongitudeSegments);
+                    changed = true;
+                }
             }
         }
-        volumeChanged |= w.var("Base Radius/Scale", mVolumeRadius, 0.01f, 5.0f);
-        volumeChanged |= w.var("Max Normal Deviation", mVolumeMaxNormalDeviationDegrees, 0.1f, 90.0f);
-        volumeChanged |= w.var("Max Plane Deviation", mVolumeMaxRelativePlaneDeviation, 0.00001f, 0.1f);
-        volumeChanged |= w.var("Max Faces Per Patch", mVolumeMaxFacesPerPatch, 1u, 2048u);
-        if (mVolumeTriangulationType == 5)
+        if (!isObjVolumeGeometry(mVolumeGeometryType) || mVolumeNormalizeObj)
+            changed |= w.var("Base Radius/Scale", mVolumeRadius, 0.01f, 5.0f);
+        if (mVolumeTriangulationType != 3)
         {
-            volumeChanged |= w.var("GP Max Neighbors", mVolumePclMaximumNearestNeighbors, 3u, 512u);
-            volumeChanged |= w.var("GP Mu", mVolumePclMu, 0.1f, 10.0f);
-            volumeChanged |= w.var("GP Search Radius", mVolumePclSearchRadius, 0.0f, 100.0f);
-            volumeChanged |= w.var("GP Min Angle", mVolumePclMinimumAngleDegrees, 0.0f, 60.0f);
-            volumeChanged |= w.var("GP Max Angle", mVolumePclMaximumAngleDegrees, 60.0f, 179.0f);
+            if (auto patch = w.group("Patch settings"))
+            {
+                changed |= patch.var("Max Normal Deviation", mVolumeMaxNormalDeviationDegrees, 0.1f, 90.f);
+                changed |= patch.var("Max Plane Deviation", mVolumeMaxRelativePlaneDeviation, 0.00001f, 0.1f);
+                changed |= patch.var("Max Faces Per Patch", mVolumeMaxFacesPerPatch, 1u, 2048u);
+            }
+            if (mVolumeTriangulationType == 1 || mVolumeTriangulationType == 4)
+                changed |= w.checkbox("Score local flips in 3D", mVolumeSurfaceLocalFlips);
+            if (mVolumeTriangulationType == 5)
+            {
+                if (auto gp = w.group("Greedy projection settings"))
+                {
+                    changed |= gp.var("Max Neighbors", mVolumePclMaximumNearestNeighbors, 3u, 512u);
+                    changed |= gp.var("Mu", mVolumePclMu, 0.1f, 10.f);
+                    changed |= gp.var("Search Radius", mVolumePclSearchRadius, 0.f, 100.f);
+                    changed |= gp.var("Min Angle", mVolumePclMinimumAngleDegrees, 0.f, 60.f);
+                    changed |= gp.var("Max Angle", mVolumePclMaximumAngleDegrees, 60.f, 179.f);
+                }
+            }
         }
-        bool volumeInstanceChanged = w.var("Instance Count", mVolumeInstanceCount, 1u, 100000u);
-        volumeInstanceChanged |= w.checkbox("3D Instance Grid", mVolumeUse3DInstancing);
-
-        if (dimensionalityChanged || volumeChanged)
-        {
-            generateVolumeGeometry();
-        }
-        if (volumeInstanceChanged)
+        bool instances = w.var("Instance Count", mVolumeInstanceCount, 1u, 100000u);
+        if (mVolumeInstanceCount > 1) instances |= w.checkbox("3D Instance Grid", mVolumeUse3DInstancing);
+        if (dimensionalityChanged || changed) generateVolumeGeometry();
+        if (instances)
         {
             updateVolumeGridParams();
             updateCameraParams();
         }
-        else if (!mIndexCount)
+        if (!mVolumeResultValid) w.text("Source fallback or failed audit; excluded from benchmark rankings.");
+        if (!mVolumeObjStatus.empty()) w.text(mVolumeObjStatus);
+        if (auto stats = w.group("Mesh statistics"))
         {
-            uploadVolumeGeometry();
+            stats.text(fmt::format("Source: {} vertices, {} faces, {} triangles", mVolumeSourceVertexCount, mVolumeSourceFaceCount, mVolumeSourceTriangleCount));
+            stats.text(fmt::format("Output: {} vertices, {} triangles", mVolumeVertices.size(), mVolumeIndices.size() / 3));
+            stats.text(fmt::format("Patches: {}   Failed: {}", mVolumePatchCount, mVolumeFailedPatchCount));
+            stats.text(fmt::format("Reference error: {:.6g}", mVolumeReferenceError));
+            stats.text(fmt::format("Instance grid: {} x {} x {}", mVolumeGridCols, mVolumeGridRows, mVolumeGridLayers));
+            if (mVolumeObjPolygonFaceCount) stats.text(fmt::format("OBJ polygon faces: {}", mVolumeObjPolygonFaceCount));
         }
-
-        w.text("Geometry: " + mVolumeGeometryName);
-        w.text("Source vertices: %u", mVolumeSourceVertexCount);
-        w.text("Source faces: %u", mVolumeSourceFaceCount);
-        w.text("Source triangles: %u", mVolumeSourceTriangleCount);
-        w.text("Output vertices: %u", static_cast<uint32_t>(mVolumeVertices.size()));
-        w.text("Triangles: %u", static_cast<uint32_t>(mVolumeIndices.size() / 3));
-        if (isObjVolumeGeometry(mVolumeGeometryType) && !mVolumeObjStatus.empty())
-        {
-            w.text(mVolumeObjStatus);
-            if (mVolumeObjPolygonFaceCount > 0)
-            {
-                w.text("Fan-triangulated OBJ polygon faces: %u", mVolumeObjPolygonFaceCount);
-            }
-        }
-        if (mVolumeUse3DInstancing)
-        {
-            w.text(
-                "Instance grid: " + std::to_string(mVolumeGridCols) + " x " + std::to_string(mVolumeGridRows) + " x " +
-                std::to_string(mVolumeGridLayers)
-            );
-        }
-        else
-        {
-            w.text("Instance grid: " + std::to_string(mVolumeGridCols) + " x " + std::to_string(mVolumeGridRows));
-        }
-        w.text("Patches: %u", mVolumePatchCount);
-        if (!mVolumeResultValid)
-            w.text("Excluded from rankings: source fallback or failed quality audit.");
-        if (mVolumeFailedPatchCount > 0)
-        {
-            w.text("Failed patches: %u", mVolumeFailedPatchCount);
-        }
-
-        if (w.button("Run Benchmark"))
-        {
-            startVolumeBenchmark();
-        }
-        if (mVolumeBenchmark.active)
-        {
-            w.text(
-                "Benchmarking volumetric method " + std::to_string(mVolumeBenchmark.method + 1) + " / " +
-                std::to_string(mVolumeBenchmark.methods.size())
-            );
-            w.text(
-                "Orientation " + std::to_string(std::min(mVolumeBenchmark.orientation + 1u, kVolumeBenchmarkOrientationCount)) + " / " +
-                std::to_string(kVolumeBenchmarkOrientationCount)
-            );
-        }
-        if (!mVolumeBenchmark.outputPath.empty())
-        {
-            w.text("Benchmark CSV: %s", mVolumeBenchmark.outputPath.c_str());
-        }
+        if (mVizMode == VizMode::LitPreview) mLitSettings.drawGui(w);
+        if (w.button("Run Benchmark")) startVolumeBenchmark();
+        if (!mVolumeBenchmark.outputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mVolumeBenchmark.outputPath).filename().string());
     }
     else
     {
-        // Triangulation type
-        Gui::DropdownList triangTypes = {
-            {0, "Ear Clipping"},
-            {1, "MWT"},
-            {2, "Centroid Fan"},
-            {3, "Greedy"},
-            {4, "Strip"},
-            {5, "MaxMin"},
-            {6, "MinMax"},
-            {7, "CDT"},
-            {8, "Earcut (Mapbox)"},
-            {9, "Earcut + Flip"},
-            {10, "CDT + Flip"}
-        };
-        bool triangChanged = w.dropdown("Triangulation", triangTypes, mTriangulationType);
-
-        bool meshOptChanged = w.checkbox("Use Mesh Optimizer", mUseMeshOptimizer);
-
+        bool changed = w.checkbox("Use Circle", mUseCircle);
+        changed |= w.dropdown("Triangulation", {
+            {0, "Ear Clipping"}, {1, "MWT"}, {2, "Centroid Fan"}, {3, "Greedy"}, {4, "Strip"},
+            {5, "MaxMin"}, {6, "MinMax"}, {7, "CDT"}, {8, "Earcut (Mapbox)"}, {9, "Earcut + Flip"}, {10, "CDT + Flip"}}, mTriangulationType);
+        changed |= w.checkbox("Use Mesh Optimizer", mUseMeshOptimizer);
         if (mUseCircle)
         {
-            bool circleChanged = false;
-            circleChanged |= w.var("Vertex Count", mCircleVertexCount, 3u, 1000u);
-            circleChanged |= w.var("Radius X", mEllipseRadiusX, 0.01f, 0.5f);
-            circleChanged |= w.var("Radius Y", mEllipseRadiusY, 0.01f, 0.5f);
-            if (circleChanged || modeChanged || triangChanged || meshOptChanged || dimensionalityChanged)
-            {
-                generateCircle();
-            }
+            changed |= w.var("Vertex Count", mCircleVertexCount, 3u, 1000u);
+            changed |= w.var("Radius X", mEllipseRadiusX, 0.01f, 0.5f);
+            changed |= w.var("Radius Y", mEllipseRadiusY, 0.01f, 0.5f);
+            if (changed || dimensionalityChanged) generateCircle();
         }
         else
         {
-            bool planarChanged = false;
-            planarChanged |= w.var("Max Bezier Deviation", mMaxBezierDeviation, 0.1f, 100.0f);
-            planarChanged |= w.textbox("SVG Path", mSvgPath);
-            planarChanged |= modeChanged;
-            planarChanged |= triangChanged;
-            planarChanged |= meshOptChanged;
-            planarChanged |= dimensionalityChanged;
-            if (planarChanged)
-            {
-                loadSvg(mSvgPath);
-            }
+            changed |= w.var("Max Bezier Deviation", mMaxBezierDeviation, 0.1f, 100.f);
+            changed |= w.textbox("SVG Path", mSvgPath);
+            if (changed || dimensionalityChanged) loadSvg(mSvgPath);
         }
-
-        w.separator();
-        bool gridChanged = false;
-        gridChanged |= w.var("Grid Cols", mGridCols, 1u, 100u);
-        gridChanged |= w.var("Grid Rows", mGridRows, 1u, 100u);
-        if (gridChanged)
-        {
-            updateGridParams();
-        }
-
-        w.separator();
+        bool grid = w.var("Grid Cols", mGridCols, 1u, 100u);
+        grid |= w.var("Grid Rows", mGridRows, 1u, 100u);
+        if (grid) updateGridParams();
         if (w.button("Run Benchmark"))
         {
             beginBenchmarkSession();
@@ -1079,49 +930,26 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             mPlanarBenchmark.phase = BenchmarkPhase::Prepare;
             mPlanarBenchmark.currentMethod = 0;
             mPlanarBenchmark.waitFrameCounter = 0;
-
             mPlanarBenchmark.methods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
             mBenchmarkLog.clear();
-
             mFolderBenchmark.outputPath = makeTimestampedCsvPath("helper_lane_planar_benchmark");
             std::filesystem::create_directories(std::filesystem::path(mFolderBenchmark.outputPath).parent_path());
             mBenchmarkFile.open(mFolderBenchmark.outputPath, std::ios::out | std::ios::trunc);
             if (mBenchmarkFile.is_open())
-                mBenchmarkFile << "Method,CPU_Time_ms,GPU_DrawMedian_ms,GPU_DrawMean_ms,GPU_DrawStdDev_ms,HelperLaneCount,EdgeLength,MSAA,"
-                                  "GridCols,GridRows,Shader\n";
+                mBenchmarkFile << "Method,CPU_Time_ms,GPU_DrawMedian_ms,GPU_DrawMean_ms,GPU_DrawStdDev_ms,HelperLaneCount,EdgeLength,MSAA,GridCols,GridRows,Shader\n";
             writeBenchmarkMetadata(mFolderBenchmark.outputPath);
         }
-
-        if (!mFolderBenchmark.outputPath.empty())
-        {
-            w.text("Benchmark CSV: %s", mFolderBenchmark.outputPath.c_str());
-        }
-
+        if (!mFolderBenchmark.outputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mFolderBenchmark.outputPath).filename().string());
         if (w.button("Benchmark Folder"))
         {
-            std::string folderPath = selectFolder();
-            if (!folderPath.empty())
-            {
-                benchmarkFolder(folderPath);
-            }
+            const auto path = selectFolder();
+            if (!path.empty()) benchmarkFolder(path);
         }
     }
-
-    w.separator();
-    w.textbox("PNG Path", mScreenshotPath);
-    if (w.button("Save Screenshot"))
+    if (auto capture = w.group("PNG capture"))
     {
-        mRequestScreenshot = true;
-    }
-
-    w.separator();
-    w.text("Window Size");
-    bool windowSizeChanged = false;
-    windowSizeChanged |= w.var("Width", mDesiredWindowWidth, 100u, 7680u);
-    windowSizeChanged |= w.var("Height", mDesiredWindowHeight, 100u, 4320u);
-    if (w.button("Set Window Size"))
-    {
-        resizeWindow(mDesiredWindowWidth, mDesiredWindowHeight);
+        capture.textbox("PNG Path", mScreenshotPath);
+        if (capture.button("Save Screenshot")) mRequestScreenshot = true;
     }
 }
 
@@ -1134,51 +962,6 @@ bool HelperLaneViz::onMouseEvent(const MouseEvent& mouseEvent)
     return false;
 }
 void HelperLaneViz::onHotReload(HotReloadFlags reloaded) {}
-
-void HelperLaneViz::resizeWindow(uint32_t width, uint32_t height)
-{
-// Use Windows API to find and resize our window by title
-#ifdef _WIN32
-    HWND hwnd = FindWindowA(NULL, "Falcor Project Template");
-    if (!hwnd)
-    {
-        // Try alternative: find window by class name (GLFW uses "GLFW30" as default class name)
-        hwnd = FindWindowA("GLFW30", NULL);
-    }
-
-    if (!hwnd)
-    {
-        // Last resort: use foreground window (might not be our window, but better than nothing)
-        hwnd = GetForegroundWindow();
-    }
-
-    if (hwnd)
-    {
-        // Get current window position to maintain it
-        RECT rect;
-        GetWindowRect(hwnd, &rect);
-        int x = rect.left;
-        int y = rect.top;
-
-        // Resize using Windows API
-        // Note: SetWindowPos uses client area size, so we need to account for window frame
-        // For simplicity, we'll use MoveWindow which works with client area
-        RECT clientRect;
-        GetClientRect(hwnd, &clientRect);
-        int currentClientWidth = clientRect.right - clientRect.left;
-        int currentClientHeight = clientRect.bottom - clientRect.top;
-
-        // Calculate the difference between window size and client size (frame size)
-        int frameWidth = (rect.right - rect.left) - currentClientWidth;
-        int frameHeight = (rect.bottom - rect.top) - currentClientHeight;
-
-        // Resize window (including frame) to achieve desired client size
-        SetWindowPos(
-            hwnd, NULL, x, y, static_cast<int>(width) + frameWidth, static_cast<int>(height) + frameHeight, SWP_NOZORDER | SWP_NOACTIVATE
-        );
-    }
-#endif
-}
 
 int runPerformanceBenchmark(int argc, char** argv);
 int runRegressionChecks();
@@ -1195,7 +978,9 @@ int runMain(int argc, char** argv)
     if (argc > 1 && std::string(argv[1]) == "--screenshot")
         return runScreenshot(argc, argv);
     SampleAppConfig config;
-    config.windowDesc.title = "Falcor Project Template";
+    config.windowDesc.title = "Helper Lane Visualizer";
+    config.windowDesc.width = 1920;
+    config.windowDesc.height = 1080;
     config.windowDesc.resizableWindow = true;
 
     HelperLaneViz project(config);
