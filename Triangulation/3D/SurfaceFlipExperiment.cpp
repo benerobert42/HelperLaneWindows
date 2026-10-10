@@ -31,7 +31,7 @@ struct Candidate
     double gain;
     uint64_t edge;
     uint32_t version;
-    bool operator<(const Candidate& b) const { return gain < b.gain; }
+    bool operator<(const Candidate& b) const { return gain == b.gain ? edge > b.edge : gain < b.gain; }
 };
 struct Flip
 {
@@ -41,7 +41,12 @@ struct Flip
 };
 } // namespace
 
-Result optimize(const Triangulation3D::MeshTriangulationResult& source, const ReferenceSurface& reference, double planePenalty)
+Result optimize(
+    const Triangulation3D::MeshTriangulationResult& source,
+    const ReferenceSurface& reference,
+    double planePenalty,
+    const std::function<double(uint32_t, uint32_t)>& edgeCost
+)
 {
     Result result;
     result.mesh = source;
@@ -127,7 +132,7 @@ Result optimize(const Triangulation3D::MeshTriangulationResult& source, const Re
              std::abs(dot(sub(c, center), normal)),
              std::abs(dot(sub(d, center), normal))}
         );
-        f.gain = oldLength - newLength - planePenalty * residual;
+        f.gain = (edgeCost ? edgeCost(f.a, f.b) - edgeCost(f.c, f.d) : oldLength - newLength) - planePenalty * residual;
         if (f.gain <= 1e-8 * std::max(oldLength, newLength))
             return false;
         if (checkReference)

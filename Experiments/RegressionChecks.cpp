@@ -36,6 +36,21 @@ int runRegressionChecks()
         require(Triangulation::optimizeByMinLengthFlips(projected, diagonal) == diagonal, "Historical local flip metric preserved");
         auto surfaceFlip = Triangulation::optimizeByMinLengthFlips(projected, diagonal, -1, -1, &surface);
         require(surfaceFlip.size() == diagonal.size() && surfaceFlip != diagonal, "Explicit 3D metric flips the shorter surface diagonal");
+        Mesh quad;
+        quad.vertices = {{0, 0, 0}, {2, 0, 0}, {3, 1, 0}, {1, 1, 0}};
+        quad.faces = {{0, 1, 2}, {0, 2, 3}};
+        auto quadSource = useSourceMeshTriangulation(quad);
+        auto shortQuad = SurfaceFlipExperiment::optimize(quadSource, 0).mesh;
+        require(shortQuad.indices != quadSource.indices, "World objective shortens a planar diagonal");
+        SurfaceFlipExperiment::ReferenceSurface quadReference(quadSource);
+        auto custom = SurfaceFlipExperiment::optimize(
+            shortQuad, quadReference, 0, [](uint32_t a, uint32_t b) { return (a == 1 && b == 3) || (a == 3 && b == 1) ? 10.0 : 1.0; }
+        );
+        require(
+            custom.flips == 1 && MeshValidation::audit(custom.mesh, quadSource).topologyOK(),
+            "Alternative edge cost changes the objective while retaining topology"
+        );
+        require(quadReference.sampledError(custom.mesh) < 1e-6, "Alternative cost retains the fixed reference surface guard");
         Mesh concave;
         for (auto p : std::vector<Falcor::float2>{{0, 0}, {3, 0}, {3, 3}, {2, 3}, {2, 1}, {1, 1}, {1, 3}, {0, 3}})
             concave.vertices.emplace_back(p.x, p.y, 0);
@@ -68,7 +83,10 @@ int runRegressionChecks()
         {
             std::ofstream(fixture) << text;
             auto loaded = ObjMeshLoader::load(fixture.string());
-            require(!loaded.success && loaded.mesh.faces.empty() && loaded.sourceFaceCount == 0, "Malformed OBJ must fail without shifting position IDs");
+            require(
+                !loaded.success && loaded.mesh.faces.empty() && loaded.sourceFaceCount == 0,
+                "Malformed OBJ must fail without shifting position IDs"
+            );
         }
         std::ofstream(fixture) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf -3/1 -2/2 -1/3\n";
         require(ObjMeshLoader::load(fixture.string()).success, "OBJ negative position indices");
@@ -99,7 +117,8 @@ int runRegressionChecks()
             const auto source = useSourceMeshTriangulation(loaded.mesh);
             require(source.success && source.indices.size() == model[2] * 3, "Preset Source Faces must preserve triangles");
             require(MeshValidation::audit(source, source).topologyOK(), "Preset source must pass the topology audit");
-            std::cout << getModelPresetPath(model[0]).filename().string() << ": " << model[1] << " vertices, " << model[2] << " triangles\n";
+            std::cout << getModelPresetPath(model[0]).filename().string() << ": " << model[1] << " vertices, " << model[2]
+                      << " triangles\n";
         }
         std::cout << "Regression checks passed.\n";
         return 0;
