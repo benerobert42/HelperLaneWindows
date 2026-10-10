@@ -40,6 +40,7 @@
 #include "Falcor.h"
 #include "Core/Program/ProgramManager.h"
 #include <fmt/format.h>
+#include <imgui.h>
 
 #include <algorithm>
 #include <chrono>
@@ -719,37 +720,51 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 
 void HelperLaneViz::onGuiRender(Gui* pGui)
 {
-    const uint32_t width = std::min(680u, std::max(320u, getTargetFbo()->getWidth() * 2u / 5u));
-    const uint32_t height = std::max(320u, getTargetFbo()->getHeight());
+    const uint32_t screenWidth = getTargetFbo()->getWidth(), screenHeight = getTargetFbo()->getHeight();
+    const uint32_t margin = std::min(8u, std::min(screenWidth, screenHeight) / 8u);
+    const uint32_t width = std::min({520u, std::max(320u, screenWidth / 3u), screenWidth - 2u * margin});
+    const uint32_t height = screenHeight - 3u * margin;
     const uint32_t controlsHeight = height * 3u / 5u;
-    const uint32_t profilerY = 16u + controlsHeight + 12u;
-    const auto flags = Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::AllowMove;
-    if (!mUiLayoutInitialized)
+    const uint32_t profilerY = 2u * margin + controlsHeight;
+    const bool placeWindows = mDockUiToLeft || !mUiLayoutInitialized;
+    const auto flags = Gui::WindowFlags::ShowTitleBar |
+        (mDockUiToLeft ? Gui::WindowFlags::NoResize : Gui::WindowFlags::AllowMove);
+    auto* profiler = getDevice()->getProfiler();
+    if (placeWindows && profiler && profiler->isEnabled())
     {
-        // Establish this sample's default for Falcor's existing profiler window.
-        // SampleApp renders its contents later in the same UI frame.
-        Gui::Window profiler(pGui, "Profiler", {width, height - profilerY - 16u}, {16u, profilerY}, flags);
-        profiler.windowPos(16u, profilerY);
-        profiler.windowSize(width, height - profilerY - 16u);
+        // Seed the window once; SampleApp owns its contents and close button.
+        if (!mUiLayoutInitialized)
+        {
+            Gui::Window profilerWindow(pGui, "Profiler", {width, height - controlsHeight}, {margin, profilerY}, flags);
+            profilerWindow.windowPos(margin, profilerY);
+            profilerWindow.windowSize(width, height - controlsHeight);
+        }
+        else
+        {
+            ImGui::SetWindowPos("Profiler", ImVec2(float(margin), float(profilerY)));
+            ImGui::SetWindowSize("Profiler", ImVec2(float(width), float(height - controlsHeight)));
+        }
     }
-    Gui::Window w(pGui, "Helper Lane Sample", {width, controlsHeight}, {16, 16}, flags);
-    if (!mUiLayoutInitialized)
+    Gui::Window w(pGui, "Helper Lane Sample", {width, controlsHeight}, {margin, margin}, flags);
+    if (placeWindows)
     {
-        w.windowPos(16, 16);
+        w.windowPos(margin, margin);
         w.windowSize(width, controlsHeight);
-        mUiLayoutInitialized = true;
     }
-    if (!mBenchmarkStatus.empty()) w.text(mBenchmarkStatus);
-    if (!mBenchmarkOutputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mBenchmarkOutputPath).filename().string());
+    mUiLayoutInitialized = true;
+    w.checkbox("Dock UI to left", mDockUiToLeft);
+    if (!mBenchmarkStatus.empty()) w.textWrapped(mBenchmarkStatus);
+    if (!mBenchmarkOutputPath.empty()) w.textWrapped("Benchmark CSV: " + std::filesystem::path(mBenchmarkOutputPath).filename().string());
     if (benchmarkRunning())
     {
         w.text(fmt::format("Benchmark case {}/{}; configuration is locked.", mBenchmarkCaseIndex + 1, mBenchmarkCases.size()));
-        w.text("GPU timing: flat raster draw; diagnostics run separately.");
+        w.textWrapped("GPU timing: flat raster draw; diagnostics run separately.");
         if (w.button("Cancel Benchmark")) finishBenchmarkSession("Benchmark cancelled.");
         return;
     }
 
-    auto* profiler = getDevice()->getProfiler();
+    w.text(fmt::format("Elapsed frame: {:.3f} ms avg (last {:.3f})",
+        1000.0 * getFrameRate().getAverageFrameTime(), 1000.0 * getFrameRate().getLastFrameTime()));
     if (profiler && profiler->isEnabled())
     {
         for (auto* event : profiler->getEvents())
@@ -799,7 +814,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             if (isObjVolumeGeometry(mVolumeGeometryType)) mVolumeTriangulationType = 3;
             else applyVolumeTargetVertexCount();
         }
-        changed |= w.dropdown("Volumetric Triangulation", {
+        changed |= w.dropdown("Triangulation", {
             {3, "Source Faces"}, {0, "CDT"}, {1, "CDT + Flip"}, {2, "Greedy Point Set"},
             {4, "LMT (experimental)"}, {5, "Greedy Projection (experimental)"}}, mVolumeTriangulationType);
         if (isObjVolumeGeometry(mVolumeGeometryType))

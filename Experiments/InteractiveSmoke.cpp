@@ -131,6 +131,8 @@ bool HelperLaneViz::advanceInteractiveSmoke()
         std::filesystem::remove(fixture / "triangle.svg");
         std::filesystem::remove(fixture);
         std::cout << "Folder sweep, SVG measurement, partial cancellation and output failure checks passed.\n";
+        mBenchmarkStatus.clear();
+        mBenchmarkOutputPath.clear();
         mGeometryDimensionality = GeometryDimensionality::Volumetric;
         mVolumeGeometryType = 8;
         mVolumeTriangulationType = 3;

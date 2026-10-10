@@ -233,6 +233,7 @@ private:
     bool mRequestScreenshot = false;
 
     bool mUiLayoutInitialized = false;
+    bool mDockUiToLeft = true;
 };
 
 int runScreenshot(int argc, char** argv);
