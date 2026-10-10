@@ -59,6 +59,7 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"ValidForRanking", number(r.complete && m.valid && r.counts.active > 0)},
         {"Flips", number(m.flips)},
         {"TotalEdgeLength3D", number(m.audit.edgeLength)},
+        {"TotalSceneEdgeLength3D", number(m.audit.edgeLength * c.instances)},
         {"SurfaceArea", number(m.audit.area)},
         {"DiagnosticHelpers", number(r.counts.helpers)},
         {"DiagnosticActiveLanes", number(r.counts.active)},
@@ -70,7 +71,8 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"GPU_PassMax_ms", number(pass.maximum)},
         {"MeshValid", number(m.valid)},
         {"RunId", run},
-        {"Protocol", "3"},
+        {"Protocol", "4"},
+        {"QueueDepth", number(c.queueDepth)},
         {"PassScope", BenchmarkSupport::csvField(c.passScope)},
         {"CPUScope", BenchmarkSupport::csvField(c.cpuScope)},
         {"Warmup", number(c.warmup)},
@@ -105,26 +107,59 @@ void writeRow(std::ostream& stream, const Row& row, bool header = false)
 }
 } // namespace
 
-Runner::Runner(Falcor::ref<Falcor::Device> device)
-    : mDrawTimer(Falcor::GpuTimer::create(device)), mPassTimer(Falcor::GpuTimer::create(device))
-{}
+Runner::Runner(Falcor::ref<Falcor::Device> device) : mpDevice(device), mpFence(device->createFence()) {}
 
 void Runner::start(Case description)
 {
-    if (!description.samples || !description.instances || !description.width || !description.height)
+    if (!description.samples || !description.instances || !description.width || !description.height || !description.queueDepth ||
+        description.queueDepth > 32)
         throw std::runtime_error("Invalid benchmark case settings");
     if (mStarted && !mResult.complete)
         throw std::runtime_error("Previous benchmark case is unfinished");
     mResult = {std::move(description), {}, {}};
     mResult.samples.reserve(mResult.description.samples);
     mWarmupRemaining = mResult.description.warmup;
+    mIssued = 0;
+    if (mSlots.size() != mResult.description.queueDepth)
+    {
+        mSlots.clear();
+        for (uint32_t i = 0; i < mResult.description.queueDepth; ++i)
+            mSlots.push_back({Falcor::GpuTimer::create(mpDevice), Falcor::GpuTimer::create(mpDevice)});
+    }
     mStarted = true;
+}
+
+void Runner::drain()
+{
+    while (mResult.samples.size() < mIssued)
+    {
+        auto& slot = mSlots[mResult.samples.size() % mSlots.size()];
+        mpFence->wait(slot.fenceValue);
+        const Sample sample{slot.draw->getElapsedTime(), slot.pass->getElapsedTime()};
+        if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
+            throw std::runtime_error("Invalid GPU draw/pass sample");
+        mResult.samples.push_back(sample);
+    }
 }
 
 bool Runner::step(Falcor::RenderContext* context, const Work& work)
 {
     if (!mStarted || mResult.complete)
         throw std::runtime_error("No pending benchmark case");
+    // Retire queries in issue order. Wait only when reusing a full ring or draining.
+    if (!mWarmupRemaining && mResult.samples.size() < mIssued)
+    {
+        auto& slot = mSlots[mResult.samples.size() % mSlots.size()];
+        if (mIssued - mResult.samples.size() == mSlots.size() || mIssued == mResult.description.samples)
+            mpFence->wait(slot.fenceValue);
+        if (mpFence->getCurrentValue() >= slot.fenceValue)
+        {
+            const Sample sample{slot.draw->getElapsedTime(), slot.pass->getElapsedTime()};
+            if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
+                throw std::runtime_error("Invalid GPU draw/pass sample");
+            mResult.samples.push_back(sample);
+        }
+    }
     if (mWarmupRemaining)
     {
         work.clear();
@@ -133,24 +168,25 @@ bool Runner::step(Falcor::RenderContext* context, const Work& work)
         if (!--mWarmupRemaining)
             context->submit(true);
     }
-    else if (mResult.samples.size() < mResult.description.samples)
+    else if (mIssued < mResult.description.samples)
     {
-        mPassTimer->begin();
+        auto& slot = mSlots[mIssued % mSlots.size()];
+        slot.pass->begin();
         work.clear();
-        mDrawTimer->begin();
+        slot.draw->begin();
         work.draw();
-        mDrawTimer->end();
+        slot.draw->end();
         work.finish();
-        mPassTimer->end();
-        mDrawTimer->resolve();
-        mPassTimer->resolve();
-        context->submit(true);
-        const Sample sample{mDrawTimer->getElapsedTime(), mPassTimer->getElapsedTime()};
-        if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
-            throw std::runtime_error("Invalid GPU draw/pass sample");
-        mResult.samples.push_back(sample);
+        slot.pass->end();
+        slot.draw->resolve();
+        slot.pass->resolve();
+        context->submit(false);
+        slot.fenceValue = context->signal(mpFence.get());
+        ++mIssued;
+        if (mSlots.size() == 1)
+            drain();
     }
-    else
+    else if (mResult.samples.size() == mResult.description.samples)
     {
         // Counter atomics and synchronous readback are outside every timed sample.
         mResult.counts = work.diagnose();
@@ -177,7 +213,7 @@ Writer::Writer(const std::filesystem::path& path, const Falcor::Device& device, 
     mMetadata.open(sidecar);
     writeRow(mSummary, summaryRow({}, {}, {}, mRunId), true);
     writeRow(mRaw, rawRow({}, 0, {}, mRunId), true);
-    mMetadata << "Protocol: 3; isolated synchronous draw/pass samples; separate diagnostics\nRunId: " << mRunId
+    mMetadata << "Protocol: 4; bounded fence-retired draw/pass queries; separate diagnostics\nRunId: " << mRunId
               << "\nBuild: " << HELPERLANE_BUILD_CONFIG << "\nCompiler: " << HELPERLANE_COMPILER_DESC
               << "\nSource revision: " << HELPERLANE_GIT_REVISION << "\nCompiled source digest: " << HELPERLANE_SOURCE_DIGEST
               << "\nGPU: " << device.getInfo().adapterName << "\nAPI: " << device.getInfo().apiName

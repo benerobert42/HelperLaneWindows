@@ -330,6 +330,7 @@ void HelperLaneViz::finishBenchmarkSession(const std::string& message, bool comp
         {
             if (!complete && mBenchmarkRunner && mBenchmarkRunner->started())
             {
+                mBenchmarkRunner->drain();
                 const auto& result = mBenchmarkRunner->result();
                 if (!result.complete && !result.samples.empty() && result.description.id == mBenchmarkWriter->caseCount())
                     mBenchmarkWriter->write(result);

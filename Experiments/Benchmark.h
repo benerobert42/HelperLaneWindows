@@ -20,6 +20,7 @@ struct Case
 {
     uint32_t id = 0, block = 0, view = 0, msaa = 1, instances = 1, width = 0, height = 0;
     uint32_t gridCols = 1, gridRows = 1, gridLayers = 1, warmup = 0, samples = 1;
+    uint32_t queueDepth = 1;
     double xRotation = 0, yRotation = 0, radius = 0;
     bool depth = true, meshopt = false, surfaceLocalFlips = false;
     std::string geometry, method, shader, cpuScope, passScope;
@@ -55,13 +56,21 @@ public:
     explicit Runner(Falcor::ref<Falcor::Device> device);
     void start(Case description);
     bool step(Falcor::RenderContext* context, const Work& work);
+    void drain(); // Preserve issued samples when a case is cancelled.
     bool started() const { return mStarted; }
     const Result& result() const { return mResult; }
 
 private:
-    Falcor::ref<Falcor::GpuTimer> mDrawTimer, mPassTimer;
+    struct Slot
+    {
+        Falcor::ref<Falcor::GpuTimer> draw, pass;
+        uint64_t fenceValue = 0;
+    };
+    Falcor::ref<Falcor::Device> mpDevice;
+    Falcor::ref<Falcor::Fence> mpFence;
+    std::vector<Slot> mSlots;
     Result mResult;
-    uint32_t mWarmupRemaining = 0;
+    uint32_t mWarmupRemaining = 0, mIssued = 0;
     bool mStarted = false;
 };
 
