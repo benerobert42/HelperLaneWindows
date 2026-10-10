@@ -28,13 +28,11 @@
 #pragma once
 #include "Falcor.h"
 #include "Core/SampleApp.h"
-#include "Core/API/GpuTimer.h"
+#include "Experiments/Benchmark.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include <optional>
 #include "Rendering/LitPreview.h"
 #include "Triangulation/3D/ReferenceSurface.h"
-
-#include <fstream>
 
 struct Vertex;
 
@@ -66,8 +64,6 @@ private:
     uint32_t mIndexCount = 0;
     ref<VertexLayout> mpLayout;
     ref<VertexLayout> mpLayout3D;
-    ref<GpuTimer> mpDrawTimer;
-    double mLastDrawMs = 0;
     ref<Texture> mpHelperLaneCounter;
     ref<RasterizerState> defaultRsState;
     ref<RasterizerState> wireframeRsState;
@@ -130,6 +126,7 @@ private:
     uint32_t mVolumePatchCount = 0;
     uint32_t mVolumeFailedPatchCount = 0;
     bool mVolumeResultValid = false;
+    MeshValidation::Audit mVolumeAudit;
     double mVolumeReferenceError = 0;
     Triangulation3D::Mesh mVolumeCachedSource;
     Triangulation3D::MeshTriangulationResult mVolumeCachedBaseline;
@@ -170,7 +167,7 @@ private:
 
     VizMode mVizMode = VizMode::HelperLanes;
 
-    bool benchmarkRunning() const { return mPlanarBenchmark.active || mVolumeBenchmark.active || mFolderBenchmark.active; }
+    bool benchmarkRunning() const { return mBenchmarkSavedState.has_value(); }
     struct SavedInteractiveState
     {
         GeometryDimensionality dimensionality;
@@ -183,89 +180,36 @@ private:
     };
     std::optional<SavedInteractiveState> mBenchmarkSavedState;
     void beginBenchmarkSession();
-    void writeBenchmarkMetadata(const std::string& path);
     friend int runInteractiveSmoke();
     friend int runScreenshot(int argc, char** argv);
     bool advanceInteractiveSmoke();
     int mSmokeStage = -1;
     uint32_t mSmokeFrames = 0;
     bool mSmokeFailed = false;
-    void finishBenchmarkSession(const std::string& message);
-
-    struct VolumeBenchmarkDetailRow
-    {
-        uint32_t orientation = 0;
-        uint32_t method = 0;
-        double gpuMedianMs = 0.0;
-        double projectedEdgeLength = 0.0;
-        double helperLaneCount = 0.0;
-        double cpuMs = 0.0, edgeLength3D = 0.0, referenceError = 0.0;
-        uint32_t failedPatches = 0, samples = 0;
-        bool valid = false;
-        uint32_t activeLanes = 0;
-    };
-    std::vector<std::string> mBenchmarkLog;
-    std::ofstream mBenchmarkFile;
-    VizMode mSavedVizMode = VizMode::HelperLanes;
-    enum class BenchmarkPhase
-    {
-        Prepare,
-        Warmup,
-        Timing,
-        Diagnostics
-    };
+    void finishBenchmarkSession(const std::string& message, bool complete = false);
     struct BenchmarkConfig
     {
         uint32_t warmup = 50, planarSamples = 100, volumeSamples = 200, orientations = 32;
+    } mBenchmarkConfig;
+    struct InteractiveCase
+    {
+        Benchmark::Case measurement;
+        bool volume = true, circle = true;
+        uint32_t method = 0, circleVertices = 32, cols = 1, rows = 1;
+        float ellipseX = 0.4f, ellipseY = 0.4f;
+        std::string svgPath;
     };
-    BenchmarkConfig mBenchmarkConfig, mBenchmarkConfigSnapshot;
-
-    struct PlanarBenchmarkState
-    {
-        bool active = false;
-        BenchmarkPhase phase = BenchmarkPhase::Prepare;
-        int currentMethod = 0;
-        std::vector<int> methods;
-        uint32_t waitFrameCounter = 0;
-        double cpuTimeMs = 0.0;
-        std::vector<float> gpuTimes;
-
-    } mPlanarBenchmark;
-
-    struct VolumeBenchmarkState
-    {
-        bool active = false;
-        BenchmarkPhase phase = BenchmarkPhase::Prepare;
-        int method = 0;
-        std::vector<uint32_t> methods;
-        uint32_t waitFrameCounter = 0;
-        double cpuTimeMs = 0.0;
-        float medianGpuMs = 0.0f;
-        uint32_t orientation = 0;
-        uint32_t visibleOrientations = 0;
-        double gpuMedianSum = 0.0;
-        double gpuMedianMin = 0.0;
-        double gpuMedianMax = 0.0;
-        double projectedEdgeLengthSum = 0.0;
-        double helperLaneSum = 0.0;
-        std::vector<float> gpuTimes;
-        std::string outputPath;
-        std::vector<VolumeBenchmarkDetailRow> detailRows;
-
-    } mVolumeBenchmark;
-
-    struct FolderBenchmarkState
-    {
-        bool active = false;
-        std::vector<std::string> folderFiles;
-        int currentFolderFile = 0;
-        std::string outputPath;
-        int syntheticShapePhase = 0; // 0 = SVG files, 1 = circle, 2 = ellipse
-        int configPhase = 0;         // 0-3 for MSAA/Grid combinations
-
-    } mFolderBenchmark;
-
-    void startBenchmarkConfig(int configPhase);
+    std::vector<InteractiveCase> mBenchmarkCases;
+    size_t mBenchmarkCaseIndex = 0;
+    std::unique_ptr<Benchmark::Runner> mBenchmarkRunner;
+    std::unique_ptr<Benchmark::Writer> mBenchmarkWriter;
+    Benchmark::MeshMetrics mBenchmarkMeshMetrics;
+    std::string mBenchmarkOutputPath, mBenchmarkStatus;
+    void startInteractiveBenchmark(std::vector<InteractiveCase> cases, const std::string& path);
+    void startPlanarBenchmark(const std::vector<uint32_t>& methods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10});
+    void startVolumeBenchmark(const std::vector<uint32_t>& methods = {3, 0, 1, 2, 4, 5});
+    void processBenchmarkFrame(RenderContext*, const ref<Fbo>&);
+    void benchmarkFolder(const std::string& folderPath);
 
     void uploadMesh(const void*, size_t, size_t, const std::vector<uint32_t>&, const ref<VertexLayout>&);
     void uploadGeometry();
@@ -278,22 +222,6 @@ private:
     void updateVolumeGridParams();
     void updateVolumeModelParams();
     void updateCameraParams(uint32_t width = 0, uint32_t height = 0);
-
-    void processBenchmarkStep(RenderContext* pRenderContext);
-    void processBenchmarkFolderStep(RenderContext* pRenderContext);
-    void startVolumeBenchmark();
-    void processVolumeBenchmarkStep(RenderContext* pRenderContext);
-    void writeVolumeBenchmarkHeader();
-    void writeVolumeBenchmarkRow(
-        const std::string& methodName,
-        double averageMedianGpuMs,
-        double minMedianGpuMs,
-        double maxMedianGpuMs,
-        double averageProjectedEdgeLength,
-        double averageHelperLaneCount
-    );
-    void writeVolumeBenchmarkDetails();
-    void benchmarkFolder(const std::string& folderPath);
 
     // Screenshot functionality
     void renderLitPreview(RenderContext* context, const ref<Fbo>& target);

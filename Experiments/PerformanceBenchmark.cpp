@@ -1,9 +1,8 @@
 #include "Falcor.h"
 #include "Core/SampleApp.h"
-#include "Core/API/GpuTimer.h"
 #include "BenchmarkGeometry.h"
 #include "BenchmarkOptions.h"
-#include "BenchmarkSupport.h"
+#include "Benchmark.h"
 #include "Triangulation/MeshValidation.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 #include "Triangulation/3D/Triangulation3D.h"
@@ -13,28 +12,19 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <numeric>
 #include <random>
-#include <set>
-#include <sstream>
 #include <stdexcept>
 
 namespace
 {
 using namespace Falcor;
 using MeshResult = Triangulation3D::MeshTriangulationResult;
-using Edge = std::pair<uint32_t, uint32_t>;
 using Clock = std::chrono::steady_clock;
 using BenchmarkOptions::Options;
 using BenchmarkOptions::parse;
-Edge edge(uint32_t a, uint32_t b)
-{
-    return {std::min(a, b), std::max(a, b)};
-}
 double length(float3 p)
 {
     return std::sqrt(double(p.x) * p.x + double(p.y) * p.y + double(p.z) * p.z);
@@ -67,14 +57,12 @@ struct Pipeline
 class PerformanceApp : public SampleApp
 {
     Options o;
-    std::ofstream summary, raw;
+    std::unique_ptr<Benchmark::Runner> runner;
+    std::unique_ptr<Benchmark::Writer> writer;
     ref<GraphicsState> state;
     ref<Texture> texture, counters;
     ref<Sampler> sampler;
-    ref<GpuTimer> timer, passTimer;
     std::array<std::array<Pipeline, 2>, 2> pipelines;
-    uint32_t caseId = 0;
-    std::string runId = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     bool captured = false;
     bool geometryPrimed = false;
     ref<Vao> upload(const MeshResult& m)
@@ -179,7 +167,8 @@ class PerformanceApp : public SampleApp
         uint32_t block,
         uint32_t view,
         uint32_t msaa,
-        uint32_t stress
+        uint32_t stress,
+        float radius
     )
     {
         if (!p.vao)
@@ -203,139 +192,116 @@ class PerformanceApp : public SampleApp
             context->submit(true);
             geometryPrimed = true;
         }
-        for (uint32_t i = 0; i < o.warmup; ++i)
+        Benchmark::Case c;
+        c.id = writer->caseCount();
+        c.geometry = shape;
+        c.method = p.name;
+        c.radius = radius;
+        c.block = block;
+        c.view = view;
+        c.msaa = msaa;
+        c.shader = stress ? "Material16" : "Texture1";
+        c.instances = o.instances;
+        c.width = o.width;
+        c.height = o.height;
+        c.depth = o.depth;
+        c.meshopt = o.meshopt;
+        c.warmup = o.warmup;
+        c.samples = o.samples;
+        c.gridCols = params.gridCols;
+        c.gridRows = (o.instances + params.gridCols - 1) / params.gridCols;
+        c.xRotation = 22.5 + 45 * (view % 2);
+        c.yRotation = 11.25 + 90 * (view / 2);
+        c.passScope = "ClearDraw";
+        c.cpuScope = "ConstructionExcludingFinalAuditUpload";
+        c.mesh.audit = p.check;
+        c.mesh.vertices = uint32_t(p.mesh.vertices.size());
+        c.mesh.triangles = uint32_t(p.mesh.indices.size() / 3);
+        c.mesh.sourceTriangles = sourceTriangles;
+        c.mesh.cpuMs = p.cpuMs;
+        c.mesh.failedPatches = p.failed;
+        c.mesh.referenceError = p.referenceError;
+        c.mesh.flips = p.flips;
+        c.mesh.valid = p.valid;
+        Benchmark::Work work;
+        // Constants and pipeline selection precede every draw timestamp.
+        work.clear = [&]
         {
             context->clearFbo(fbo.get(), float4(0), 1, 0);
-            draw(context, fbo, p, pipe, params);
-            getDevice()->endFrame();
-        }
-        context->submit(true);
-        std::vector<double> times, passTimes;
-        times.reserve(o.samples);
-        passTimes.reserve(o.samples);
-        for (uint32_t i = 0; i < o.samples; ++i)
-        {
-            passTimer->begin();
-            context->clearFbo(fbo.get(), float4(0), 1, 0);
-            // Set constants and state before timestamping; pipeline is warmed.
             state->setFbo(fbo);
             state->setVao(p.vao);
             state->setProgram(pipe.program);
             pipe.vars->getRootVar()["Params"].setBlob(params);
-            timer->begin();
-            context->drawIndexedInstanced(state.get(), pipe.vars.get(), uint32_t(p.mesh.indices.size()), o.instances, 0, 0, 0);
-            timer->end();
-            passTimer->end();
-            timer->resolve();
-            passTimer->resolve();
-            context->submit(true);
-            double value = timer->getElapsedTime();
-            double passValue = passTimer->getElapsedTime();
-            if (!(value > 0 && std::isfinite(value)))
-                throw std::runtime_error("Missing/invalid GPU timer sample.");
-            if (!(passValue >= value && std::isfinite(passValue)))
-                throw std::runtime_error("Invalid nested GPU pass timing.");
-            times.push_back(value);
-            passTimes.push_back(passValue);
-            getDevice()->endFrame();
+        };
+        work.draw = [&]
+        { context->drawIndexedInstanced(state.get(), pipe.vars.get(), uint32_t(p.mesh.indices.size()), o.instances, 0, 0, 0); };
+        work.finish = [] {};
+        work.diagnose = [&]
+        {
+            context->clearFbo(fbo.get(), float4(0), 1, 0);
+            context->clearUAV(counters->getUAV().get(), uint4(0));
+            draw(context, fbo, p, pipelines[stress][1], params);
+            const auto bytes = context->readTextureSubresource(counters.get(), 0);
+            const auto counts = reinterpret_cast<const uint32_t*>(bytes.data());
+            return Benchmark::Counts{counts[0], counts[1]};
+        };
+        runner->start(std::move(c));
+        bool complete;
+        try
+        {
+            do
+            {
+                complete = runner->step(context, work);
+                getDevice()->endFrame();
+            } while (!complete);
         }
+        catch (...)
+        {
+            if (!runner->result().samples.empty())
+                writer->write(runner->result());
+            writer->finish(false, "Measurement failed.");
+            throw;
+        }
+        const auto& result = runner->result();
+        writer->write(result);
         if (!captured && p.name == "Source" && msaa == 1 && stress == 0)
         {
+            // Diagnostics alter the target: capture the original uninstrumented workload.
+            work.clear();
+            work.draw();
             auto path = o.output;
             path.replace_extension(".png");
             fbo->getColorTexture(0)->captureToFile(0, 0, path, Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None, false);
+            getDevice()->endFrame();
             captured = true;
         }
-        // Instrumentation runs separately and is never included in timed draws.
-        context->clearFbo(fbo.get(), float4(0), 1, 0);
-        context->clearUAV(counters->getUAV().get(), uint4(0));
-        draw(context, fbo, p, pipelines[stress][1], params);
-        auto bytes = context->readTextureSubresource(counters.get(), 0);
-        const uint32_t* counts = reinterpret_cast<const uint32_t*>(bytes.data());
-        uint32_t helpers = counts[0], active = counts[1];
-        getDevice()->endFrame();
-        const auto drawStatistics = BenchmarkSupport::summarize(times);
-        const auto passStatistics = BenchmarkSupport::summarize(passTimes);
-        const auto median = drawStatistics.median;
-        for (uint32_t i = 0; i < times.size(); ++i)
-            raw << caseId << "," << i << "," << times[i] << "," << passTimes[i] << "\n";
-        summary << caseId << "," << BenchmarkSupport::csvField(shape) << "," << BenchmarkSupport::csvField(p.name) << "," << block << ","
-                << view << "," << msaa << "," << (stress ? "Material16" : "Texture1") << "," << o.instances << "," << o.width << ","
-                << o.height << "," << o.depth << "," << o.meshopt << "," << o.samples << "," << median << "," << drawStatistics.mean << ","
-                << drawStatistics.standardDeviation << "," << drawStatistics.minimum << "," << drawStatistics.maximum << "," << p.cpuMs
-                << "," << p.mesh.vertices.size() << "," << p.mesh.indices.size() / 3 << "," << sourceTriangles << "," << p.failed << ","
-                << p.check.duplicates << "," << p.check.nonmanifold << "," << p.check.winding << "," << p.check.missingBoundary << ","
-                << p.check.unexpectedBoundary << "," << p.check.degenerate << "," << p.referenceError << "," << (p.valid && active > 0)
-                << "," << p.flips << "," << p.check.edgeLength << "," << p.check.area << "," << helpers << "," << active << ","
-                << (helpers + active ? double(helpers) / (helpers + double(active)) : 0.0) << "," << passStatistics.median << ","
-                << passStatistics.mean << "," << passStatistics.standardDeviation << "," << passStatistics.minimum << ","
-                << passStatistics.maximum << "," << p.valid << "," << runId << "\n";
-        summary.flush();
-        raw.flush();
-        if (caseId % 16 == 0)
-            std::cout << "Case " << caseId << ": " << shape << " " << p.name << " " << (stress ? "material" : "texture") << " " << msaa
-                      << "x, " << median << " ms, H=" << helpers << ", P=" << active << std::endl;
-        ++caseId;
+        if (result.description.id % 16 == 0)
+        {
+            std::cout << "Case " << result.description.id << ": " << shape << " " << p.name << " " << result.description.shader << " "
+                      << msaa << "x, last draw=" << result.samples.back().drawMs << " ms, H=" << result.counts.helpers
+                      << ", P=" << result.counts.active << std::endl;
+        }
     }
 
 public:
     PerformanceApp(const SampleAppConfig& config, Options options) : SampleApp(config), o(std::move(options)) {}
     void onLoad(RenderContext* context) override
     {
-        if (!o.output.parent_path().empty())
-            std::filesystem::create_directories(o.output.parent_path());
-        summary.exceptions(std::ios::failbit | std::ios::badbit);
-        raw.exceptions(std::ios::failbit | std::ios::badbit);
-        summary.open(o.output);
-        auto rawPath = o.output;
-        rawPath.replace_extension(".raw.csv");
-        raw.open(rawPath);
-        if (!summary || !raw)
-            throw std::runtime_error("Cannot open benchmark output.");
-        summary << std::setprecision(10);
-        raw << std::setprecision(10);
-        summary << "Case,Geometry,Method,Block,View,MSAA,Shader,Instances,Width,Height,Depth,Meshopt,Samples,GPU_Median_ms,GPU_Mean_ms,GPU_"
-                   "StdDev_ms,GPU_Min_ms,GPU_Max_ms,ConstructionCPU_ms,OutputVertices,OutputTriangles,SourceTriangles,FailedPatches,"
-                   "DuplicateTriangles,NonManifoldEdges,WindingErrors,MissingBoundaryEdges,UnexpectedBoundaryEdges,DegenerateTriangles,"
-                   "SampledReferenceError,ValidForRanking,Flips,TotalEdgeLength3D,SurfaceArea,DiagnosticHelpers,DiagnosticActiveLanes,"
-                   "DiagnosticHelperFraction,GPU_PassMedian_ms,GPU_PassMean_ms,GPU_PassStdDev_ms,GPU_PassMin_ms,GPU_PassMax_ms,MeshValid,"
-                   "RunId\n";
-        raw << "Case,Sample,GPU_Draw_ms,GPU_Pass_ms\n";
-        auto info = getDevice()->getInfo();
-        auto metadataPath = o.output;
-        metadataPath.replace_extension(".metadata.txt");
-        std::ofstream metadata;
-        metadata.exceptions(std::ios::failbit | std::ios::badbit);
-        metadata.open(metadataPath);
-        metadata << "RunId: " << runId << "\nGPU: " << info.adapterName << "\nAPI: " << info.apiName
-                 << "\nBuild: " << HELPERLANE_BUILD_CONFIG << "\nCompiler: " << HELPERLANE_COMPILER_DESC << "; debug layer disabled\nSource revision: " << HELPERLANE_GIT_REVISION
-                 << "\nCompiled source digest: " << HELPERLANE_SOURCE_DIGEST
-                 << "\nProtocol: 2; isolated synchronous draws, diagnostics separate\nTimer: uint64 timestamp subtraction before double "
-                    "conversion\nGPU pass "
-                    "timing: clear and draw, excluding resolve/readback/present/UI\nCPU timing: construction and per-flip guards; shared "
-                    "reference accelerator setup and final "
-                    "topology/reference audit excluded; single observation\nView sweep: Y=11.25+90*floor(view/2) degrees, "
-                    "X=22.5+45*(view%2) degrees\nSeed: 20261010\nTimed region: indexed instanced draw only; clears, uploads, resolve, "
-                    "readback, and diagnostics excluded\nColor: RGBA8Unorm\nDepth: "
-                 << o.depth << " (D32Float with matching MSAA)\nCulling: None\nMeshopt: " << o.meshopt
-                 << "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, edge midpoints, triangle centroids sampled; not "
-                    "Hausdorff guarantee\nHeapPlane score: old diagonal length - new diagonal length - 4 * quad plane residual\nTexture: "
-                    "deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap\nShader: 1 implicit sample or 16 dependent implicit "
-                    "samples; no lane-dependent UVs or wave ALU in timed shader\nDiagnostics: separate shader with quad and wave "
-                    "operations; these counts are proxies, not hardware counters\nGPU priming: 200 ms wall time per geometry, both "
-                    "shaders\nWarmup frames per case: "
-                 << o.warmup << "\nSamples per case: " << o.samples << "\nViews: " << o.views << "\nBlocks: " << o.blocks
-                 << "\nResolution: " << o.width << 'x' << o.height << "\nInstances: " << o.instances << "\nGeometries: ";
-        for (const auto& name : o.shapes)
-            metadata << name << ' ';
-        metadata << "\nMethods: ";
-        for (const auto& name : o.methods)
-            metadata << name << ' ';
-        metadata << "\nMSAA: ";
-        for (auto count : o.msaa)
-            metadata << count << ' ';
-        metadata << "\n";
-        metadata.flush();
+        runner = std::make_unique<Benchmark::Runner>(getDevice());
+        writer = std::make_unique<Benchmark::Writer>(
+            o.output,
+            *getDevice(),
+            "Frontend: CLI; debug layer disabled\nSeed: 20261010; randomized method order per block/view/MSAA/shader"
+            "\nGPU priming: 200 ms wall time per geometry, both shaders"
+            "\nColor: RGBA8Unorm; depth: D32Float matching MSAA; culling: None"
+            "\nCPU scope: construction and per-flip guards; shared reference setup, final topology/reference audit and upload excluded."
+            "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, midpoints and centroids sampled."
+            "\nHeapPlane: diagonal length reduction minus 4 * quad plane residual."
+            "\nTexture: deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap."
+            "\nShaders: 1 implicit sample or 16 dependent implicit samples."
+            "\nEdge length: unique geometric edges per mesh."
+        );
+        const auto info = getDevice()->getInfo();
         std::cout << "GPU: " << info.adapterName << " (" << info.apiName << ")" << std::endl;
         state = GraphicsState::create(getDevice());
         RasterizerState::Desc raster;
@@ -357,8 +323,6 @@ public:
             2, 1, ResourceFormat::R32Uint, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
         sampler = make_ref<Sampler>(getDevice(), Sampler::Desc());
-        timer = GpuTimer::create(getDevice());
-        passTimer = GpuTimer::create(getDevice());
         for (uint32_t stress = 0; stress < 2; ++stress)
             for (uint32_t diagnostic = 0; diagnostic < 2; ++diagnostic)
             {
@@ -425,8 +389,7 @@ public:
                         cols,
                         spacing,
                         0.5f * float(cols - 1),
-                        o.instances
-                    };
+                        o.instances};
                     for (uint32_t msaa : o.msaa)
                     {
                         const auto& fbo = framebuffers.at(msaa);
@@ -446,13 +409,15 @@ public:
                                     block,
                                     view,
                                     msaa,
-                                    stress
+                                    stress,
+                                    radius
                                 );
                         }
                     }
                 }
         }
-        std::cout << "Benchmark complete: " << caseId << " cases, " << o.output.string() << std::endl;
+        writer->finish(true, "Benchmark complete.");
+        std::cout << "Benchmark complete: " << writer->caseCount() << " cases, " << o.output.string() << std::endl;
         shutdown();
     }
 };

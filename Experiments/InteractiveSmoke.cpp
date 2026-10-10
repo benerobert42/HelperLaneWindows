@@ -16,9 +16,9 @@ bool HelperLaneViz::advanceInteractiveSmoke()
     }
     if (benchmarkRunning())
         return true;
-    if (mSmokeStage && (mBenchmarkSavedState || mBenchmarkLog.empty() || mBenchmarkLog.back().find("complete") == std::string::npos))
+    if (mSmokeStage && (mBenchmarkSavedState || mBenchmarkStatus.empty() || mBenchmarkStatus.find("complete") == std::string::npos))
     {
-        std::cerr << "Interactive benchmark failed: " << (mBenchmarkLog.empty() ? "no result" : mBenchmarkLog.back()) << "\n";
+        std::cerr << "Interactive benchmark failed: " << mBenchmarkStatus << "\n";
         mSmokeFailed = true;
         shutdown();
         return false;
@@ -89,9 +89,8 @@ bool HelperLaneViz::advanceInteractiveSmoke()
             shutdown();
             return false;
         }
-        startVolumeBenchmark();
-        mVolumeBenchmark.methods = {3, 0, 2};
-        std::cout << "Interactive volume " << cntMSAA << "x: " << mVolumeBenchmark.outputPath << "\n";
+        startVolumeBenchmark({3, 0, 2});
+        std::cout << "Interactive volume " << cntMSAA << "x: " << mBenchmarkOutputPath << "\n";
     }
     else
     {
@@ -107,11 +106,7 @@ bool HelperLaneViz::advanceInteractiveSmoke()
         mTriangulationType = 8;
         mVizMode = VizMode::Wireframe;
         generateCircle();
-        beginBenchmarkSession();
-        mPlanarBenchmark.active = true;
-        mPlanarBenchmark.currentMethod = 0;
-        mPlanarBenchmark.phase = BenchmarkPhase::Prepare;
-        mPlanarBenchmark.methods = {8, 10};
+        startPlanarBenchmark({8, 10});
     }
     ++mSmokeStage;
     return true;

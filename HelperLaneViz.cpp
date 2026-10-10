@@ -103,7 +103,6 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     DepthStencilState::Desc depth;
     depth.setDepthEnabled(true).setDepthWriteMask(true).setDepthFunc(ComparisonFunc::Less);
     mpState->setDepthStencilState(DepthStencilState::create(depth));
-    mpDrawTimer = GpuTimer::create(getDevice());
 
     RasterizerState::Desc rsDesc;
     rsDesc.setCullMode(RasterizerState::CullMode::None);
@@ -448,10 +447,11 @@ void HelperLaneViz::generateVolumeGeometry()
 
     mVolumeBoundsRadius = std::max(computeMaxDistanceFromOrigin(sourceMesh.vertices), 0.001f);
     mVolumeResultValid = false;
+    mVolumeAudit = {};
     mVolumeReferenceError = 0;
     if (result.success && mVolumeCachedBaseline.success)
     {
-        auto check = MeshValidation::audit(result, mVolumeCachedBaseline);
+        mVolumeAudit = MeshValidation::audit(result, mVolumeCachedBaseline);
         mVolumeReferenceError = mVolumeReference->sampledError(result);
         float3 lo = sourceMesh.vertices.front(), hi = lo;
         for (auto p : sourceMesh.vertices)
@@ -459,7 +459,7 @@ void HelperLaneViz::generateVolumeGeometry()
             lo = math::min(lo, p);
             hi = math::max(hi, p);
         }
-        mVolumeResultValid = result.status == Triangulation3D::ResultStatus::Complete && check.topologyOK() &&
+        mVolumeResultValid = result.status == Triangulation3D::ResultStatus::Complete && mVolumeAudit.topologyOK() &&
                              result.indices.size() == mVolumeCachedBaseline.indices.size() &&
                              mVolumeReferenceError <= length3(hi - lo) * 0.001001;
     }
@@ -620,8 +620,7 @@ std::string selectFolder()
 
 void HelperLaneViz::onShutdown()
 {
-    if (mBenchmarkFile.is_open())
-        mBenchmarkFile.close();
+    if (benchmarkRunning()) finishBenchmarkSession("Benchmark interrupted by shutdown.");
 }
 void HelperLaneViz::onResize(uint32_t width, uint32_t height)
 {
@@ -642,24 +641,11 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
 {
     if (mSmokeStage >= 0 && !advanceInteractiveSmoke())
         return;
-    try
+    if (benchmarkRunning())
     {
-        if (mFolderBenchmark.active)
-        {
-            processBenchmarkFolderStep(pRenderContext);
-        }
-        else if (mVolumeBenchmark.active)
-        {
-            processVolumeBenchmarkStep(pRenderContext);
-        }
-        else if (mPlanarBenchmark.active)
-        {
-            processBenchmarkStep(pRenderContext);
-        }
-    }
-    catch (const std::exception& e)
-    {
-        finishBenchmarkSession(std::string("Benchmark failed: ") + e.what());
+        try { processBenchmarkFrame(pRenderContext, pTargetFbo); }
+        catch (const std::exception& e) { finishBenchmarkSession(std::string("Benchmark failed: ") + e.what()); }
+        return;
     }
 
     if (mGeometryDimensionality == GeometryDimensionality::Volumetric && mVizMode == VizMode::LitPreview)
@@ -697,28 +683,12 @@ void HelperLaneViz::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>&
             mpState->setRasterizerState(defaultRsState);
         }
 
-        mLastDrawMs = std::numeric_limits<double>::quiet_NaN();
         if (mIndexCount)
         {
-            const bool timeDraw = benchmarkRunning() && !mReadBackHelperLaneCount;
-            if (timeDraw)
-                mpDrawTimer->begin();
-            uint32_t instanceCount =
-                mGeometryDimensionality == GeometryDimensionality::Volumetric ? std::max(mVolumeInstanceCount, 1u) : mGridCols * mGridRows;
-            if (timeDraw)
-                pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
-            else
-            {
-                FALCOR_PROFILE(pRenderContext, "MeshDraw");
-                pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
-            }
-            if (timeDraw)
-            {
-                mpDrawTimer->end();
-                mpDrawTimer->resolve();
-                pRenderContext->submit(true);
-                mLastDrawMs = mpDrawTimer->getElapsedTime();
-            }
+            const uint32_t instanceCount = mGeometryDimensionality == GeometryDimensionality::Volumetric
+                ? std::max(mVolumeInstanceCount, 1u) : mGridCols * mGridRows;
+            FALCOR_PROFILE(pRenderContext, "MeshDraw");
+            pRenderContext->drawIndexedInstanced(mpState.get(), mpVars.get(), mIndexCount, instanceCount, 0, 0, 0);
         }
 
         if (mpHelperLaneCounter && mIndexCount && mReadBackHelperLaneCount && mVizMode == VizMode::HelperLanes)
@@ -769,9 +739,11 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         w.windowSize(width, controlsHeight);
         mUiLayoutInitialized = true;
     }
+    if (!mBenchmarkStatus.empty()) w.text(mBenchmarkStatus);
+    if (!mBenchmarkOutputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mBenchmarkOutputPath).filename().string());
     if (benchmarkRunning())
     {
-        w.text("Benchmark running; configuration is locked.");
+        w.text(fmt::format("Benchmark case {}/{}; configuration is locked.", mBenchmarkCaseIndex + 1, mBenchmarkCases.size()));
         w.text("GPU timing: flat raster draw; diagnostics run separately.");
         if (w.button("Cancel Benchmark")) finishBenchmarkSession("Benchmark cancelled.");
         return;
@@ -898,7 +870,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         }
         if (mVizMode == VizMode::LitPreview) mLitSettings.drawGui(w);
         if (w.button("Run Benchmark")) startVolumeBenchmark();
-        if (!mVolumeBenchmark.outputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mVolumeBenchmark.outputPath).filename().string());
+
     }
     else
     {
@@ -923,23 +895,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
         bool grid = w.var("Grid Cols", mGridCols, 1u, 100u);
         grid |= w.var("Grid Rows", mGridRows, 1u, 100u);
         if (grid) updateGridParams();
-        if (w.button("Run Benchmark"))
-        {
-            beginBenchmarkSession();
-            mPlanarBenchmark.active = true;
-            mPlanarBenchmark.phase = BenchmarkPhase::Prepare;
-            mPlanarBenchmark.currentMethod = 0;
-            mPlanarBenchmark.waitFrameCounter = 0;
-            mPlanarBenchmark.methods = {0, 1, 3, 4, 5, 6, 7, 8, 9, 10};
-            mBenchmarkLog.clear();
-            mFolderBenchmark.outputPath = makeTimestampedCsvPath("helper_lane_planar_benchmark");
-            std::filesystem::create_directories(std::filesystem::path(mFolderBenchmark.outputPath).parent_path());
-            mBenchmarkFile.open(mFolderBenchmark.outputPath, std::ios::out | std::ios::trunc);
-            if (mBenchmarkFile.is_open())
-                mBenchmarkFile << "Method,CPU_Time_ms,GPU_DrawMedian_ms,GPU_DrawMean_ms,GPU_DrawStdDev_ms,HelperLaneCount,EdgeLength,MSAA,GridCols,GridRows,Shader\n";
-            writeBenchmarkMetadata(mFolderBenchmark.outputPath);
-        }
-        if (!mFolderBenchmark.outputPath.empty()) w.text("Benchmark CSV: " + std::filesystem::path(mFolderBenchmark.outputPath).filename().string());
+        if (w.button("Run Benchmark")) startPlanarBenchmark();
         if (w.button("Benchmark Folder"))
         {
             const auto path = selectFolder();
