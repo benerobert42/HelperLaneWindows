@@ -55,9 +55,12 @@ std::string getVolumeGeometryName(uint32_t type)
         return "Clustered Wave Patch";
     case 7:
         return "OBJ File";
-    case 8: return "Suzanne";
-    case 9: return "Bunny";
-    case 10: return "Teapot";
+    case 8:
+        return "Suzanne";
+    case 9:
+        return "Bunny";
+    case 10:
+        return "Teapot";
     case 0:
     default:
         return "Sphere";
@@ -232,7 +235,8 @@ float4x4 makeVolumeViewProj(
     const float fitDistanceY = halfY / std::max(tanHalfFovY, 1e-3f);
     const float fitDistanceX = halfX / std::max(tanHalfFovX, 1e-3f);
     const float cameraDistance = std::max(2.0f, std::max(fitDistanceX, fitDistanceY) + halfZ + 0.5f);
-    if (cameraPosition) *cameraPosition = float3(0.f, 0.f, cameraDistance);
+    if (cameraPosition)
+        *cameraPosition = float3(0.f, 0.f, cameraDistance);
     const float farPlane = std::max(10.0f, cameraDistance + halfZ + 2.0f);
 
     const float4x4 view = math::matrixFromLookAt(
@@ -275,7 +279,7 @@ float3 getVolumeInstanceOffset(
 bool projectToScreenSpace(const float4x4& viewProj, const float3& position, uint32_t width, uint32_t height, float2& outPosition)
 {
     const float4 clip = mul(viewProj, float4(position.x, position.y, position.z, 1.0f));
-    if (std::abs(clip.w) <= 1e-6f)
+    if (clip.w <= 1e-6f)
     {
         return false;
     }
@@ -297,11 +301,14 @@ double computeProjectedEdgeLengthScreenSpace(
     uint32_t gridLayers,
     bool use3DGrid,
     float gridSpacing,
-    float boundsRadius
+    float boundsRadius,
+    const float4x4* actualViewProj
 )
 {
     const std::set<std::pair<uint32_t, uint32_t>> edges = makeEdgeSet(indices);
-    const float4x4 viewProj = makeVolumeViewProj(width, height, gridCols, gridRows, gridLayers, use3DGrid, gridSpacing, boundsRadius);
+    const float4x4 viewProj = actualViewProj
+                                  ? *actualViewProj
+                                  : makeVolumeViewProj(width, height, gridCols, gridRows, gridLayers, use3DGrid, gridSpacing, boundsRadius);
     double length = 0.0;
 
     instanceCount = std::max(instanceCount, 1u);

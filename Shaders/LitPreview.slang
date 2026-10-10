@@ -1,5 +1,11 @@
 // Lighting equations adapted directly from GraphEx/Shaders/Example/Mesh/Lighting.ps.slang.
 // POSITION/NORMAL transforms follow GraphEx's PosNormTex.vs.slang.
+#ifndef DIAGNOSTICS
+#define DIAGNOSTICS 0
+#endif
+#if DIAGNOSTICS
+RWTexture2D<uint> gCounters;
+#endif
 struct VSIn { float3 pos : POSITION; float3 normal : NORMAL; };
 struct V2P { float4 pos : SV_Position; float3 worldPos : POSITION; float3 normal : NORMAL; };
 cbuffer Camera { float4x4 viewProj; };
@@ -33,8 +39,22 @@ V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
     return o;
 }
 
+[earlydepthstencil]
 float4 psMain(V2P input) : SV_Target
 {
+#if DIAGNOSTICS
+    // Existing quad counting convention; this variant is never timed.
+    uint helper = IsHelperLane() ? 1u : 0u;
+    uint helpers = QuadReadLaneAt(helper, 0) + QuadReadLaneAt(helper, 1) + QuadReadLaneAt(helper, 2) + QuadReadLaneAt(helper, 3);
+    uint candidate = helper != 0 ? 4u : WaveGetLaneIndex() % 4;
+    uint leader = min(candidate, QuadReadAcrossX(candidate));
+    leader = min(leader, QuadReadAcrossY(candidate));
+    leader = min(leader, QuadReadAcrossDiagonal(candidate));
+    if (candidate == leader) {
+        InterlockedAdd(gCounters[uint2(0, 0)], helpers);
+        InterlockedAdd(gCounters[uint2(1, 0)], 4 - helpers);
+    }
+#endif
     float3 normal = normalize(input.normal);
     float3 toLight = lightType == 0u ? lightPosition - input.worldPos : lightDirection;
     float lightDistance = lightType == 0u ? length(toLight) : 0.0;

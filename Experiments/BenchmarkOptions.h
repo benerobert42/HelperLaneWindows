@@ -13,6 +13,8 @@ struct Options
     std::vector<std::string> shapes = {"sphere", "sphere_dense", "jittered", "planar", "jittered_planar", "folded"};
     std::vector<std::string> methods = {"Source", "CDT", "CDTFlip", "Greedy", "LMT", "GP", "Heap3D", "HeapPlane"};
     bool depth = true, meshopt = false, quick = false;
+    bool lit = false;
+    uint32_t queueDepth = 1;
 };
 Options parse(int argc, char** argv);
 } // namespace BenchmarkOptions

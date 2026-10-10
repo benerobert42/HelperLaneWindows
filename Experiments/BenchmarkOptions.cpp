@@ -65,6 +65,10 @@ Options parse(int argc, char** argv)
             o.depth = false;
         else if (a == "--meshopt")
             o.meshopt = true;
+        else if (a == "--lit")
+            o.lit = true;
+        else if (a == "--queue-depth")
+            o.queueDepth = parseCount(value());
         else if (a == "--quick")
             o.quick = true;
         else
@@ -86,6 +90,10 @@ Options parse(int argc, char** argv)
     for (auto s : o.msaa)
         if (s != 1 && s != 4)
             throw std::runtime_error("This study supports MSAA 1 or 4.");
+    if (!o.queueDepth || o.queueDepth > 32)
+        throw std::runtime_error("Queue depth must be 1..32.");
+    if (o.lit && !o.depth)
+        throw std::runtime_error("Lit comparisons require depth.");
     return o;
 }
 } // namespace BenchmarkOptions

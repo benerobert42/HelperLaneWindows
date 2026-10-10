@@ -3,6 +3,7 @@
 #include "BenchmarkGeometry.h"
 #include "BenchmarkOptions.h"
 #include "Benchmark.h"
+#include "Rendering/LitPreview.h"
 #include "Triangulation/MeshValidation.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 #include "Triangulation/3D/Triangulation3D.h"
@@ -39,6 +40,7 @@ struct Prepared
     double cpuMs = 0, referenceError = 0;
     uint32_t failed = 0, flips = 0;
     ref<Vao> vao;
+    std::array<std::unique_ptr<LitPreview>, 2> lit;
     bool valid = false;
 };
 struct Params
@@ -64,7 +66,9 @@ class PerformanceApp : public SampleApp
     ref<Sampler> sampler;
     std::array<std::array<Pipeline, 2>, 2> pipelines;
     bool captured = false;
-    bool geometryPrimed = false;
+    std::vector<uint32_t> sourceIndices;
+    LitPreviewSettings lighting;
+    float3 cameraPosition;
     ref<Vao> upload(const MeshResult& m)
     {
         if (m.indices.empty())
@@ -92,11 +96,52 @@ class PerformanceApp : public SampleApp
         Prepared p;
         p.name = name;
         auto start = Clock::now();
-        if (name == "Source")
+        if (name == "Source" || name == "SourceControl")
             p.mesh = Triangulation3D::useSourceMeshTriangulation(input);
-        else if (name == "Heap3D" || name == "HeapPlane")
+        else if (name == "Heap3D" || name == "HeapPlane" || name == "HeapScreen" || name == "HeapQuad")
         {
-            auto r = SurfaceFlipExperiment::optimize(source, reference, name == "HeapPlane" ? 4.0 : 0.0);
+            std::function<double(uint32_t, uint32_t)> edgeCost;
+            if (name == "HeapScreen" || name == "HeapQuad")
+            {
+                // Optimize an expected-view cost, not the single view being measured.
+                // Normalize pixels to source world-length units before blending.
+                const uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances))));
+                const uint32_t rows = (o.instances + cols - 1) / cols;
+                const float radius = computeMaxDistanceFromOrigin(source.vertices);
+                const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, radius * 2.5f, radius);
+                std::vector<std::vector<float2>> screens;
+                for (uint32_t view = 0; view < o.views; ++view)
+                {
+                    auto model =
+                        mul(math::matrixFromRotationX(math::radians(22.5f + 45.f * (view % 2))),
+                            math::matrixFromRotationY(math::radians(11.25f + 90.f * (view / 2))));
+                    screens.emplace_back(source.vertices.size());
+                    for (size_t i = 0; i < source.vertices.size(); ++i)
+                        if (!projectToScreenSpace(
+                                vp, transformPointByMatrix(model, source.vertices[i]), o.width, o.height, screens.back()[i]
+                            ))
+                            throw std::runtime_error("Optimization camera must keep every source vertex in front.");
+                }
+                auto projectedCost = [screens = std::move(screens), manhattan = name == "HeapQuad"](uint32_t a, uint32_t b)
+                {
+                    double cost = 0;
+                    for (const auto& screen : screens)
+                    {
+                        const auto d = screen[a] - screen[b];
+                        cost += manhattan ? std::abs(d.x) + std::abs(d.y) : std::sqrt(double(d.x) * d.x + double(d.y) * d.y);
+                    }
+                    return cost / screens.size();
+                };
+                double worldSum = 0, pixelSum = 0;
+                for (auto [a, b] : makeEdgeSet(source.indices))
+                {
+                    worldSum += length(source.vertices[a] - source.vertices[b]);
+                    pixelSum += projectedCost(a, b);
+                }
+                edgeCost = [projectedCost, scale = worldSum / pixelSum, &source](uint32_t a, uint32_t b)
+                { return 0.25 * length(source.vertices[a] - source.vertices[b]) + 0.75 * scale * projectedCost(a, b); };
+            }
+            auto r = SurfaceFlipExperiment::optimize(source, reference, name == "HeapPlane" ? 4.0 : 0.0, edgeCost);
             p.mesh = std::move(r.mesh);
             p.flips = r.flips;
         }
@@ -135,16 +180,32 @@ class PerformanceApp : public SampleApp
                 sizeof(float3),
                 1.05f
             );
-            meshopt_optimizeVertexFetch(
-                p.mesh.vertices.data(),
-                p.mesh.indices.data(),
-                p.mesh.indices.size(),
-                p.mesh.vertices.data(),
-                p.mesh.vertices.size(),
-                sizeof(float3)
-            );
+            // Lit normals use source vertex IDs. Cache/overdraw reordering keeps
+            // those IDs; vertex-fetch remapping would require remapping normals.
+            if (!o.lit)
+                meshopt_optimizeVertexFetch(
+                    p.mesh.vertices.data(),
+                    p.mesh.indices.data(),
+                    p.mesh.indices.size(),
+                    p.mesh.vertices.data(),
+                    p.mesh.vertices.size(),
+                    sizeof(float3)
+                );
         }
         p.vao = upload(p.mesh);
+        if (o.lit && p.vao)
+        {
+            if (p.mesh.vertices.size() != source.vertices.size() ||
+                !std::equal(
+                    p.mesh.vertices.begin(),
+                    p.mesh.vertices.end(),
+                    source.vertices.begin(),
+                    [](float3 a, float3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+                ))
+                throw std::runtime_error("Lit comparisons require identical source vertex ordering.");
+            p.lit[0] = std::make_unique<LitPreview>();
+            p.lit[1] = std::make_unique<LitPreview>(counters);
+        }
         std::cout << "Prepared " << name << ": " << p.cpuMs << " ms, " << p.mesh.indices.size() / 3 << " triangles, valid=" << p.valid
                   << ", flips=" << p.flips << std::endl;
         return p;
@@ -156,6 +217,25 @@ class PerformanceApp : public SampleApp
         state->setProgram(pipe.program);
         pipe.vars->getRootVar()["Params"].setBlob(params);
         context->drawIndexedInstanced(state.get(), pipe.vars.get(), uint32_t(p.mesh.indices.size()), o.instances, 0, 0, 0);
+    }
+    void drawLit(RenderContext* context, const ref<Fbo>& fbo, Prepared& p, const Params& params, uint32_t diagnostic)
+    {
+        const VolumeGridParams grid{
+            o.instances, params.gridCols, (o.instances + params.gridCols - 1) / params.gridCols, 1, 0, params.gridSpacing, float2(0)};
+        p.lit[diagnostic]->draw(
+            context,
+            fbo,
+            p.vao->getVertexBuffer(0),
+            p.vao->getIndexBuffer(),
+            p.mesh.vertices,
+            sourceIndices,
+            uint32_t(p.mesh.indices.size()),
+            {params.viewProj},
+            {params.model},
+            grid,
+            cameraPosition,
+            lighting
+        );
     }
     void measure(
         RenderContext* context,
@@ -174,24 +254,6 @@ class PerformanceApp : public SampleApp
         if (!p.vao)
             return;
         auto& pipe = pipelines[stress][0];
-        if (!geometryPrimed)
-        {
-            // Keep the GPU busy after CPU triangulation and pipeline creation.
-            // An identical no-flip mesh remains a control for residual clock
-            // and cache variation; warmup does not guarantee fixed GPU clocks.
-            auto start = Clock::now();
-            do
-            {
-                for (auto& shader : pipelines)
-                {
-                    context->clearFbo(fbo.get(), float4(0), 1, 0);
-                    draw(context, fbo, p, shader[0], params);
-                    getDevice()->endFrame();
-                }
-            } while (std::chrono::duration<double, std::milli>(Clock::now() - start).count() < 200);
-            context->submit(true);
-            geometryPrimed = true;
-        }
         Benchmark::Case c;
         c.id = writer->caseCount();
         c.geometry = shape;
@@ -200,7 +262,7 @@ class PerformanceApp : public SampleApp
         c.block = block;
         c.view = view;
         c.msaa = msaa;
-        c.shader = stress ? "Material16" : "Texture1";
+        c.shader = o.lit ? "LitPreview" : stress ? "Material16" : "Texture1";
         c.instances = o.instances;
         c.width = o.width;
         c.height = o.height;
@@ -208,6 +270,7 @@ class PerformanceApp : public SampleApp
         c.meshopt = o.meshopt;
         c.warmup = o.warmup;
         c.samples = o.samples;
+        c.queueDepth = o.queueDepth;
         c.gridCols = params.gridCols;
         c.gridRows = (o.instances + params.gridCols - 1) / params.gridCols;
         c.xRotation = 22.5 + 45 * (view % 2);
@@ -223,24 +286,63 @@ class PerformanceApp : public SampleApp
         c.mesh.referenceError = p.referenceError;
         c.mesh.flips = p.flips;
         c.mesh.valid = p.valid;
+        c.mesh.projectedEdgeLength = computeProjectedEdgeLengthScreenSpace(
+            p.mesh.vertices,
+            p.mesh.indices,
+            params.model,
+            o.instances,
+            o.width,
+            o.height,
+            params.gridCols,
+            o.lit ? c.gridRows : params.gridCols,
+            1,
+            false,
+            params.gridSpacing,
+            radius,
+            &params.viewProj
+        );
         Benchmark::Work work;
         // Constants and pipeline selection precede every draw timestamp.
         work.clear = [&]
         {
-            context->clearFbo(fbo.get(), float4(0), 1, 0);
+            context->clearFbo(fbo.get(), o.lit ? float4(lighting.background, 1) : float4(0), 1, 0);
             state->setFbo(fbo);
             state->setVao(p.vao);
             state->setProgram(pipe.program);
             pipe.vars->getRootVar()["Params"].setBlob(params);
         };
         work.draw = [&]
-        { context->drawIndexedInstanced(state.get(), pipe.vars.get(), uint32_t(p.mesh.indices.size()), o.instances, 0, 0, 0); };
-        work.finish = [] {};
+        {
+            if (o.lit)
+                drawLit(context, fbo, p, params, 0);
+            else
+                context->drawIndexedInstanced(state.get(), pipe.vars.get(), uint32_t(p.mesh.indices.size()), o.instances, 0, 0, 0);
+        };
+        auto resolved = msaa > 1 && o.lit ? getDevice()->createTexture2D(
+                                                o.width,
+                                                o.height,
+                                                ResourceFormat::RGBA8Unorm,
+                                                1,
+                                                1,
+                                                nullptr,
+                                                ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
+                                            )
+                                          : nullptr;
+        if (resolved)
+            c.passScope = "ClearDrawResolve";
+        work.finish = [&]
+        {
+            if (resolved)
+                context->resolveResource(fbo->getColorTexture(0), resolved);
+        };
         work.diagnose = [&]
         {
             context->clearFbo(fbo.get(), float4(0), 1, 0);
             context->clearUAV(counters->getUAV().get(), uint4(0));
-            draw(context, fbo, p, pipelines[stress][1], params);
+            if (o.lit)
+                drawLit(context, fbo, p, params, 1);
+            else
+                draw(context, fbo, p, pipelines[stress][1], params);
             const auto bytes = context->readTextureSubresource(counters.get(), 0);
             const auto counts = reinterpret_cast<const uint32_t*>(bytes.data());
             return Benchmark::Counts{counts[0], counts[1]};
@@ -257,6 +359,7 @@ class PerformanceApp : public SampleApp
         }
         catch (...)
         {
+            runner->drain();
             if (!runner->result().samples.empty())
                 writer->write(runner->result());
             writer->finish(false, "Measurement failed.");
@@ -269,9 +372,11 @@ class PerformanceApp : public SampleApp
             // Diagnostics alter the target: capture the original uninstrumented workload.
             work.clear();
             work.draw();
+            work.finish();
             auto path = o.output;
             path.replace_extension(".png");
-            fbo->getColorTexture(0)->captureToFile(0, 0, path, Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None, false);
+            (resolved ? resolved : fbo->getColorTexture(0))
+                ->captureToFile(0, 0, path, Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None, false);
             getDevice()->endFrame();
             captured = true;
         }
@@ -287,19 +392,28 @@ public:
     PerformanceApp(const SampleAppConfig& config, Options options) : SampleApp(config), o(std::move(options)) {}
     void onLoad(RenderContext* context) override
     {
+        getDevice()->getProfiler()->setEnabled(false);
         runner = std::make_unique<Benchmark::Runner>(getDevice());
         writer = std::make_unique<Benchmark::Writer>(
             o.output,
             *getDevice(),
             "Frontend: CLI; debug layer disabled\nSeed: 20261010; randomized method order per block/view/MSAA/shader"
-            "\nGPU priming: 200 ms wall time per geometry, both shaders"
+            "\nGPU priming: all timed/diagnostic/MSAA pipelines, then 1 second wall time of timed draws per geometry"
             "\nColor: RGBA8Unorm; depth: D32Float matching MSAA; culling: None"
             "\nCPU scope: construction and per-flip guards; shared reference setup, final topology/reference audit and upload excluded."
             "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, midpoints and centroids sampled."
             "\nHeapPlane: diagonal length reduction minus 4 * quad plane residual."
             "\nTexture: deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap."
             "\nShaders: 1 implicit sample or 16 dependent implicit samples."
-            "\nEdge length: unique geometric edges per mesh."
+            "\nEdge length: unique geometric edges per mesh; projected Euclidean pixel lengths summed over all instances, including "
+            "occluded edges."
+            "\nLit: existing GraphEx raster preview, fixed source normals, default single point light; early depth for opaque timed and "
+            "diagnostic variants."
+            "\nHeapScreen/HeapQuad: 25% world length + 75% normalized mean projected Euclidean/L1 length, fixed view set, central "
+            "representative instance."
+            "\nSourceControl: identical source geometry, independently uploaded, randomized with other methods."
+            "\nMeshopt: cache + overdraw reordering; vertex-fetch remap only for texture workloads."
+            "\nLit helpers: diagnostic raster quad-waste proxy; the timed lit shader has no derivatives/quad operations."
         );
         const auto info = getDevice()->getInfo();
         std::cout << "GPU: " << info.adapterName << " (" << info.apiName << ")" << std::endl;
@@ -351,9 +465,9 @@ public:
         std::mt19937 randomOrder(20261010);
         for (const auto& shape : o.shapes)
         {
-            geometryPrimed = false;
             auto input = BenchmarkGeometry::make(shape);
             auto source = Triangulation3D::useSourceMeshTriangulation(input);
+            sourceIndices = source.indices;
             if (!source.success)
                 throw std::runtime_error(
                     "Source mesh failed validation: " + shape + (source.messages.empty() ? "" : ": " + source.messages.front())
@@ -374,17 +488,53 @@ public:
                 prepared.push_back(prepare(input, source, name, errorLimit, reference));
             uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances)))), rows = (o.instances + cols - 1) / cols;
             float spacing = radius * 2.5f;
-            float halfX = 0.5f * (cols - 1) * spacing + radius, halfY = 0.5f * (rows - 1) * spacing + radius;
-            float tanY = std::tan(math::radians(45.0f) * 0.5f), aspect = float(o.width) / o.height;
-            float distance = std::max(halfY / tanY, halfX / (tanY * aspect)) + radius + 0.5f;
-            auto viewMatrix = math::matrixFromLookAt(float3(0, 0, distance), float3(0), float3(0, 1, 0), math::Handedness::RightHanded);
-            auto projection = math::perspective(math::radians(45.0f), aspect, 0.01f, distance + radius + 2);
+            const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, spacing, radius, &cameraPosition);
+            const Params prime{
+                vp,
+                mul(math::matrixFromRotationX(math::radians(22.5f)), math::matrixFromRotationY(math::radians(11.25f))),
+                cols,
+                spacing,
+                0.5f * float(cols - 1),
+                o.instances};
+            // Build every PSO and normal buffer before timing; diagnostics do not
+            // first compile between measured cases. Then sustain GPU activity.
+            for (auto& p : prepared)
+                if (p.vao)
+                    for (const auto& [samples, fbo] : framebuffers)
+                        for (uint32_t diagnostic = 0; diagnostic < 2; ++diagnostic)
+                        {
+                            context->clearFbo(fbo.get(), float4(0), 1, 0);
+                            context->clearUAV(counters->getUAV().get(), uint4(0));
+                            if (o.lit)
+                                drawLit(context, fbo, p, prime, diagnostic);
+                            else
+                                for (auto& shader : pipelines)
+                                    draw(context, fbo, p, shader[diagnostic], prime);
+                            getDevice()->endFrame();
+                        }
+            auto primeStart = Clock::now();
+            do
+            {
+                for (auto& p : prepared)
+                    if (p.vao)
+                    {
+                        const auto& fbo = framebuffers.begin()->second;
+                        context->clearFbo(fbo.get(), float4(0), 1, 0);
+                        if (o.lit)
+                            drawLit(context, fbo, p, prime, 0);
+                        else
+                            for (auto& shader : pipelines)
+                                draw(context, fbo, p, shader[0], prime);
+                        getDevice()->endFrame();
+                    }
+            } while (std::chrono::duration<double>(Clock::now() - primeStart).count() < 1);
+            context->submit(true);
             for (uint32_t block = 0; block < o.blocks; ++block)
                 for (uint32_t view = 0; view < o.views; ++view)
                 {
                     float yAngle = math::radians(11.25f + 90.0f * float(view / 2)), xAngle = math::radians(22.5f + 45.0f * float(view % 2));
                     Params params{
-                        mul(projection, viewMatrix),
+                        vp,
                         mul(math::matrixFromRotationX(xAngle), math::matrixFromRotationY(yAngle)),
                         cols,
                         spacing,
@@ -393,7 +543,7 @@ public:
                     for (uint32_t msaa : o.msaa)
                     {
                         const auto& fbo = framebuffers.at(msaa);
-                        for (uint32_t stress = 0; stress < (o.quick ? 1u : 2u); ++stress)
+                        for (uint32_t stress = 0; stress < (o.quick || o.lit ? 1u : 2u); ++stress)
                         {
                             std::vector<size_t> order(prepared.size());
                             std::iota(order.begin(), order.end(), 0);

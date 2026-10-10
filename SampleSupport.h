@@ -90,7 +90,8 @@ double computeProjectedEdgeLengthScreenSpace(
     uint32_t gridLayers,
     bool use3DGrid,
     float gridSpacing,
-    float boundsRadius
+    float boundsRadius,
+    const float4x4* actualViewProj = nullptr
 );
 float computeMaxDistanceFromOrigin(const std::vector<float3>& vertices);
 std::set<std::pair<uint32_t, uint32_t>> makeEdgeSet(const std::vector<uint32_t>& indices);

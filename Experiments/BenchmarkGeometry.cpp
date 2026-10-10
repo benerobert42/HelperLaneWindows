@@ -1,5 +1,7 @@
 #include "BenchmarkGeometry.h"
 #include "Triangulation/3D/ProceduralGeometry3D.h"
+#include "Import/ModelPresets.h"
+#include "Import/ObjMeshLoader.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -9,6 +11,13 @@ using Falcor::float3;
 
 Triangulation3D::Mesh make(const std::string& name)
 {
+    if (name == "suzanne" || name == "bunny" || name == "teapot")
+    {
+        auto result = ObjMeshLoader::load(getModelPresetPath(name == "suzanne" ? 8 : name == "bunny" ? 9 : 10).string());
+        if (!result.success)
+            throw std::runtime_error(result.message);
+        return std::move(result.mesh);
+    }
     if (name == "ellipsoid" || name == "ellipsoid_small")
         return ProceduralGeometry3D::makeEllipsoid(
             name == "ellipsoid" ? 63 : 31, name == "ellipsoid" ? 33 : 17, float3(0.825f, 0.275f, 0.475f), float3(0)

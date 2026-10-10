@@ -23,15 +23,27 @@ struct LitPreviewSettings
 class LitPreview
 {
 public:
-    void draw(Falcor::RenderContext* context, const Falcor::ref<Falcor::Fbo>& target,
-        const Falcor::ref<Falcor::Buffer>& positions, const Falcor::ref<Falcor::Buffer>& indices,
-        const std::vector<Falcor::float3>& vertices, const std::vector<uint32_t>& sourceIndices,
-        uint32_t indexCount, const CameraParams& camera, const VolumeModelParams& model,
-        const VolumeGridParams& grid, const Falcor::float3& cameraPosition, const LitPreviewSettings& settings);
+    explicit LitPreview(Falcor::ref<Falcor::Texture> counters = nullptr) : mpCounters(std::move(counters)) {}
+    void draw(
+        Falcor::RenderContext* context,
+        const Falcor::ref<Falcor::Fbo>& target,
+        const Falcor::ref<Falcor::Buffer>& positions,
+        const Falcor::ref<Falcor::Buffer>& indices,
+        const std::vector<Falcor::float3>& vertices,
+        const std::vector<uint32_t>& sourceIndices,
+        uint32_t indexCount,
+        const CameraParams& camera,
+        const VolumeModelParams& model,
+        const VolumeGridParams& grid,
+        const Falcor::float3& cameraPosition,
+        const LitPreviewSettings& settings
+    );
+
 private:
     Falcor::ref<Falcor::Program> mpProgram;
     Falcor::ref<Falcor::ProgramVars> mpVars;
     Falcor::ref<Falcor::GraphicsState> mpState;
     Falcor::ref<Falcor::Vao> mpVao;
     Falcor::ref<Falcor::Buffer> mpPositions;
+    Falcor::ref<Falcor::Texture> mpCounters;
 };

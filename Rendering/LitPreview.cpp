@@ -6,35 +6,52 @@ using namespace Falcor;
 void LitPreviewSettings::drawGui(Gui::Widgets& w)
 {
     auto group = w.group("GraphEx Raster Lighting");
-    if (!group) return;
+    if (!group)
+        return;
     group.rgbColor("Background", background);
     group.rgbColor("Material Ambient", materialAmbient);
     group.rgbColor("Material Diffuse", materialDiffuse);
     group.rgbColor("Material Specular", materialSpecular);
     group.var("Shininess", shininess, 1.f, 256.f);
     group.dropdown("Light Type", {{0, "Point"}, {1, "Directional"}}, lightType);
-    if (lightType == 0) group.var("Light Position", lightPosition);
-    else group.var("Light Direction", lightDirection);
+    if (lightType == 0)
+        group.var("Light Position", lightPosition);
+    else
+        group.var("Light Direction", lightDirection);
     group.rgbColor("Light Ambient", lightAmbient);
     group.rgbColor("Light Diffuse", lightDiffuse);
     group.rgbColor("Light Specular", lightSpecular);
     group.var("Attenuation (constant, linear, quadratic)", attenuation, 0.f, 100.f);
 }
 
-void LitPreview::draw(RenderContext* context, const ref<Fbo>& target,
-    const ref<Buffer>& positions, const ref<Buffer>& indices,
-    const std::vector<float3>& vertices, const std::vector<uint32_t>& sourceIndices,
-    uint32_t indexCount, const CameraParams& camera, const VolumeModelParams& model,
-    const VolumeGridParams& grid, const float3& cameraPosition, const LitPreviewSettings& s)
+void LitPreview::draw(
+    RenderContext* context,
+    const ref<Fbo>& target,
+    const ref<Buffer>& positions,
+    const ref<Buffer>& indices,
+    const std::vector<float3>& vertices,
+    const std::vector<uint32_t>& sourceIndices,
+    uint32_t indexCount,
+    const CameraParams& camera,
+    const VolumeModelParams& model,
+    const VolumeGridParams& grid,
+    const float3& cameraPosition,
+    const LitPreviewSettings& s
+)
 {
-    if (!indexCount) return;
+    if (!indexCount)
+        return;
     auto device = context->getDevice();
     if (!mpProgram)
     {
         ProgramDesc desc;
         desc.addShaderLibrary("Samples/HelperLaneWindows/Shaders/LitPreview.slang").vsEntry("vsMain").psEntry("psMain");
+        desc.setShaderModel(ShaderModel::SM6_6);
         mpProgram = Program::create(device, desc);
+        mpProgram->addDefine("DIAGNOSTICS", mpCounters ? "1" : "0");
         mpVars = ProgramVars::create(device, mpProgram.get());
+        if (mpCounters)
+            mpVars->setTexture("gCounters", mpCounters);
         mpState = GraphicsState::create(device);
         mpState->setProgram(mpProgram);
         DepthStencilState::Desc depth;
@@ -53,15 +70,17 @@ void LitPreview::draw(RenderContext* context, const ref<Fbo>& target,
         {
             const auto a = sourceIndices[i], b = sourceIndices[i + 1], c = sourceIndices[i + 2];
             const auto normal = SurfaceGeometryMath::cross(vertices[b] - vertices[a], vertices[c] - vertices[a]);
-            normals[a] += normal; normals[b] += normal; normals[c] += normal;
+            normals[a] += normal;
+            normals[b] += normal;
+            normals[c] += normal;
         }
         for (auto& normal : normals)
         {
             const double length = length3(normal);
             normal = length > 1e-20 ? normal / static_cast<float>(length) : float3(0.f, 1.f, 0.f);
         }
-        auto buffer = device->createBuffer(normals.size() * sizeof(float3), ResourceBindFlags::Vertex,
-            MemoryType::DeviceLocal, normals.data());
+        auto buffer =
+            device->createBuffer(normals.size() * sizeof(float3), ResourceBindFlags::Vertex, MemoryType::DeviceLocal, normals.data());
         auto layout = VertexLayout::create();
         auto positionLayout = VertexBufferLayout::create();
         positionLayout->addElement("POSITION", 0, ResourceFormat::RGB32Float, 1, 0);
