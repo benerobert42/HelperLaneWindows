@@ -637,6 +637,22 @@ MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh)
             result.indices.clear();
             return result;
         }
+        if (face.size() == 3)
+        {
+            // Explicit triangles need no polygon projection. Its fixed 2D
+            // tolerance can reject small triangles that pass the 3D audit.
+            const float area = 0.5f * length3(cross3(
+                subtract3(mesh.vertices[face[1]], mesh.vertices[face[0]]),
+                subtract3(mesh.vertices[face[2]], mesh.vertices[face[0]])));
+            if (!std::isfinite(area) || area < 1e-12f)
+            {
+                result.messages.push_back("Degenerate source face " + std::to_string(faceIndex));
+                result.indices.clear();
+                return result;
+            }
+            result.indices.insert(result.indices.end(), face.begin(), face.end());
+            continue;
+        }
         ProjectionFrame frame;
         if (!buildFrameFromNormal(mesh.vertices[face[0]], computeFaceNormalRaw(mesh, face), frame))
         {

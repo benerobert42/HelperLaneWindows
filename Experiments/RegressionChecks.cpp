@@ -79,6 +79,14 @@ int runRegressionChecks()
         auto invalid = concave;
         invalid.faces.push_back({0, 1, 99});
         require(!useSourceMeshTriangulation(invalid).success, "Invalid face must fail whole source");
+        Mesh tiny;
+        tiny.vertices = {{0.3f, 0.4f, 0.5f}, {0.30001f, 0.4f, 0.5f}, {0.3f, 0.40001f, 0.5f}};
+        tiny.faces = {{2, 1, 0}};
+        const auto tinySource = useSourceMeshTriangulation(tiny);
+        require(tinySource.success && tinySource.indices == tiny.faces[0] &&
+                MeshValidation::audit(tinySource, tinySource).topologyOK(), "Small explicit triangles preserve winding and pass the 3D audit");
+        tiny.vertices[2] = {0.30002f, 0.4f, 0.5f};
+        require(!useSourceMeshTriangulation(tiny).success, "Collinear explicit triangles must still fail");
         invalid = concave;
         invalid.vertices[0].x = std::numeric_limits<float>::quiet_NaN();
         require(!triangulateMesh(invalid).success, "Nonfinite coordinates rejected before projection");
