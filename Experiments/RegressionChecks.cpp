@@ -56,11 +56,16 @@ int runRegressionChecks()
         require(shortQuad.indices != quadSource.indices, "World objective shortens a planar diagonal");
         SurfaceFlipExperiment::ReferenceSurface quadReference(quadSource);
         auto custom = SurfaceFlipExperiment::optimize(
-            shortQuad, quadReference, 0, [](uint32_t a, uint32_t b) { return (a == 1 && b == 3) || (a == 3 && b == 1) ? 10.0 : 1.0; }
+            shortQuad, quadReference, 0, [&quad](uint32_t a, uint32_t b)
+            {
+                const auto d = quad.vertices[a] - quad.vertices[b];
+                // Foreshortening reverses the diagonals' world-length order.
+                return std::abs(double(d.x) - 2 * d.y);
+            }
         );
         require(
             custom.flips == 1 && MeshValidation::audit(custom.mesh, quadSource).topologyOK(),
-            "Alternative edge cost changes the objective while retaining topology"
+            "Projected edge cost can reverse a world-length flip while retaining topology"
         );
         require(quadReference.sampledError(custom.mesh) < 1e-6, "Alternative cost retains the fixed reference surface guard");
         Mesh concave;

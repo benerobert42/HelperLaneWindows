@@ -12,7 +12,7 @@ struct MeshMetrics
 {
     MeshValidation::Audit audit;
     uint32_t vertices = 0, triangles = 0, sourceTriangles = 0, failedPatches = 0, flips = 0;
-    double cpuMs = 0, referenceError = 0, projectedEdgeLength = 0;
+    double cpuMs = 0, setupMs = 0, referenceSetupMs = 0, referenceError = 0, projectedEdgeLength = 0;
     bool valid = false;
 };
 
@@ -21,6 +21,7 @@ struct Case
     uint32_t id = 0, block = 0, view = 0, msaa = 1, instances = 1, width = 0, height = 0;
     uint32_t gridCols = 1, gridRows = 1, gridLayers = 1, warmup = 0, samples = 1;
     uint32_t queueDepth = 1;
+    int32_t optimizationView = -1;
     double xRotation = 0, yRotation = 0, zRotation = 0, radius = 0;
     bool depth = true, meshopt = false, surfaceLocalFlips = false;
     std::string geometry, method, shader, cpuScope, passScope;

@@ -38,7 +38,8 @@ struct Prepared
     std::string name;
     MeshResult mesh;
     Audit check;
-    double cpuMs = 0, referenceError = 0;
+    double cpuMs = 0, setupMs = 0, referenceError = 0;
+    int32_t view = -1, optimizationView = -1;
     uint32_t failed = 0, flips = 0;
     ref<Vao> vao;
     std::array<std::unique_ptr<LitPreview>, 2> lit;
@@ -72,6 +73,7 @@ class PerformanceApp : public SampleApp
     std::vector<uint32_t> sourceIndices;
     LitPreviewSettings lighting;
     float3 cameraPosition;
+    double referenceSetupMs = 0;
     float4x4 modelForView(uint32_t view) const
     {
         const auto angles = BenchmarkOptions::rotationDegrees(o, view);
@@ -100,29 +102,37 @@ class PerformanceApp : public SampleApp
         const MeshResult& source,
         const std::string& name,
         double errorLimit,
-        const SurfaceFlipExperiment::ReferenceSurface& reference
+        const SurfaceFlipExperiment::ReferenceSurface& reference,
+        int32_t view = -1
     )
     {
         Prepared p;
         p.name = name;
+        p.view = view;
+        p.optimizationView = view;
+        if (name == "HeapQuadLag")
+            p.optimizationView = (view / o.axisSteps) * o.axisSteps + (view + o.axisSteps - 1) % o.axisSteps;
         auto start = Clock::now();
         if (name == "Source" || name == "SourceControl")
             p.mesh = Triangulation3D::useSourceMeshTriangulation(input);
-        else if (name == "Heap3D" || name == "HeapPlane" || name == "HeapScreen" || name == "HeapQuad")
+        else if (name == "Heap3D" || name == "HeapPlane" || name == "HeapScreen" || name == "HeapQuad" ||
+                 name == "HeapQuadSet" || name == "HeapQuadView" || name == "HeapQuadLag")
         {
             std::function<double(uint32_t, uint32_t)> edgeCost;
-            if (name == "HeapScreen" || name == "HeapQuad")
+            if (name == "HeapScreen" || name == "HeapQuad" || name == "HeapQuadSet" || view >= 0)
             {
-                // Optimize an expected-view cost, not the single view being measured.
-                // Normalize pixels to source world-length units before blending.
+                // Static methods average the view set; View/Lag use one pose.
+                // Normalize pixels to world units for the optimizer's tolerance.
                 const uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances))));
                 const uint32_t rows = (o.instances + cols - 1) / cols;
                 const float radius = computeMaxDistanceFromOrigin(source.vertices);
                 const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, radius * 2.5f, radius);
                 std::vector<std::vector<float2>> screens;
-                for (uint32_t view = 0; view < o.views; ++view)
+                const uint32_t begin = view < 0 ? 0 : uint32_t(p.optimizationView);
+                const uint32_t end = view < 0 ? o.views : begin + 1;
+                for (uint32_t objectiveView = begin; objectiveView < end; ++objectiveView)
                 {
-                    const auto model = modelForView(view);
+                    const auto model = modelForView(objectiveView);
                     screens.emplace_back(source.vertices.size());
                     for (size_t i = 0; i < source.vertices.size(); ++i)
                         if (!projectToScreenSpace(
@@ -130,7 +140,7 @@ class PerformanceApp : public SampleApp
                             ))
                             throw std::runtime_error("Optimization camera must keep every source vertex in front.");
                 }
-                auto projectedCost = [screens = std::move(screens), manhattan = name == "HeapQuad"](uint32_t a, uint32_t b)
+                auto projectedCost = [screens = std::move(screens), manhattan = name != "HeapScreen"](uint32_t a, uint32_t b)
                 {
                     double cost = 0;
                     for (const auto& screen : screens)
@@ -146,8 +156,11 @@ class PerformanceApp : public SampleApp
                     worldSum += length(source.vertices[a] - source.vertices[b]);
                     pixelSum += projectedCost(a, b);
                 }
-                edgeCost = [projectedCost, scale = worldSum / pixelSum, &source](uint32_t a, uint32_t b)
-                { return 0.25 * length(source.vertices[a] - source.vertices[b]) + 0.75 * scale * projectedCost(a, b); };
+                if (!(pixelSum > 0) || !std::isfinite(pixelSum))
+                    throw std::runtime_error("Projected objective must have finite positive source edge length.");
+                const double worldWeight = name == "HeapScreen" || name == "HeapQuad" ? 0.25 : 0.0;
+                edgeCost = [projectedCost, scale = worldSum / pixelSum, worldWeight, &source](uint32_t a, uint32_t b)
+                { return worldWeight * length(source.vertices[a] - source.vertices[b]) + (1 - worldWeight) * scale * projectedCost(a, b); };
             }
             auto r = SurfaceFlipExperiment::optimize(source, reference, name == "HeapPlane" ? 4.0 : 0.0, edgeCost);
             p.mesh = std::move(r.mesh);
@@ -205,7 +218,9 @@ class PerformanceApp : public SampleApp
             p.lit[0] = std::make_unique<LitPreview>();
             p.lit[1] = std::make_unique<LitPreview>(counters);
         }
-        std::cout << "Prepared " << name << ": " << p.cpuMs << " ms, " << p.mesh.indices.size() / 3 << " triangles, valid=" << p.valid
+        p.setupMs = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        std::cout << "Prepared " << name << " view=" << view << ": " << p.cpuMs << " ms, setup=" << p.setupMs
+                  << " ms, " << p.mesh.indices.size() / 3 << " triangles, valid=" << p.valid
                   << ", flips=" << p.flips << std::endl;
         return p;
     }
@@ -260,6 +275,7 @@ class PerformanceApp : public SampleApp
         c.radius = radius;
         c.block = block;
         c.view = view;
+        c.optimizationView = p.optimizationView;
         c.msaa = msaa;
         c.shader = o.lit ? "LitPreview" : stress ? "Material16" : "Texture1";
         if (o.explicitLod)
@@ -285,6 +301,8 @@ class PerformanceApp : public SampleApp
         c.mesh.triangles = uint32_t(p.mesh.indices.size() / 3);
         c.mesh.sourceTriangles = sourceTriangles;
         c.mesh.cpuMs = p.cpuMs;
+        c.mesh.setupMs = p.setupMs;
+        c.mesh.referenceSetupMs = referenceSetupMs;
         c.mesh.failedPatches = p.failed;
         c.mesh.referenceError = p.referenceError;
         c.mesh.flips = p.flips;
@@ -406,6 +424,9 @@ public:
             "\nGPU priming: all timed/diagnostic/MSAA pipelines, then 1 second wall time of timed draws per geometry"
             "\nColor: RGBA8Unorm; depth: D32Float matching MSAA; culling: None"
             "\nCPU scope: construction and per-flip guards; shared reference setup, final topology/reference audit and upload excluded."
+            "\nSetupCPU_ms: CLI preparation through audit, index ordering and VAO/buffer creation; excludes shared source/reference "
+            "setup, lazy lighting/PSO initialization, GPU upload completion and diagnostics. GUI reports zero (unmeasured)."
+            "\nReferenceSetupCPU_ms: shared fixed-source reference construction once per geometry; reuse across view updates."
             "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, midpoints and centroids sampled."
             "\nHeapPlane: diagonal length reduction minus 4 * quad plane residual."
             "\nTexture: deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap."
@@ -416,6 +437,9 @@ public:
             "diagnostic variants."
             "\nHeapScreen/HeapQuad: 25% world length + 75% normalized mean projected Euclidean/L1 length, fixed view set, central "
             "representative instance."
+            "\nHeapQuadSet: pure normalized mean projected L1 length over the fixed view set."
+            "\nHeapQuadView/HeapQuadLag: pure projected L1 length for the current/previous axis pose; variants prepared before "
+            "GPU timing. Lag tests one angular step of stale connectivity. OptimizationView records the training pose."
             "\nSourceControl: identical source geometry, independently uploaded, randomized with other methods."
             "\nMeshopt: selected index ordering only; vertex storage is fixed in every workload."
             "\nLit helpers: diagnostic raster quad-waste proxy; the timed lit shader has no derivatives/quad operations."
@@ -491,7 +515,9 @@ public:
                 throw std::runtime_error(
                     "Source mesh failed validation: " + shape + (source.messages.empty() ? "" : ": " + source.messages.front())
                 );
+            const auto referenceStart = Clock::now();
             SurfaceFlipExperiment::ReferenceSurface reference(source);
+            referenceSetupMs = std::chrono::duration<double, std::milli>(Clock::now() - referenceStart).count();
             float3 lo = source.vertices.front(), hi = lo;
             float radius = 0;
             for (auto p : source.vertices)
@@ -504,7 +530,11 @@ public:
             std::cout << "Geometry " << shape << ": " << source.vertices.size() << " vertices, error budget " << errorLimit << std::endl;
             std::vector<Prepared> prepared;
             for (const auto& name : o.methods)
-                prepared.push_back(prepare(input, source, name, errorLimit, reference));
+                if (name == "HeapQuadView" || name == "HeapQuadLag")
+                    for (uint32_t view = 0; view < o.views; ++view)
+                        prepared.push_back(prepare(input, source, name, errorLimit, reference, int32_t(view)));
+                else
+                    prepared.push_back(prepare(input, source, name, errorLimit, reference));
             uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances)))), rows = (o.instances + cols - 1) / cols;
             float spacing = radius * 2.5f;
             const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, spacing, radius, &cameraPosition);
@@ -522,6 +552,8 @@ public:
                     if (p.vao)
                         for (uint32_t view = 0; view < o.views; ++view)
                         {
+                            if (p.view >= 0 && uint32_t(p.view) != view)
+                                continue;
                             const auto model = modelForView(view);
                             p.rasterMetrics.emplace(view, RasterMetrics::measure(p.mesh, model, vp, o.width, o.height, o.instances, cols, spacing));
                         }
@@ -578,8 +610,10 @@ public:
                         const auto& fbo = framebuffers.at(msaa);
                         for (uint32_t stress = 0; stress < (o.quick || o.lit ? 1u : 2u); ++stress)
                         {
-                            std::vector<size_t> order(prepared.size());
-                            std::iota(order.begin(), order.end(), 0);
+                            std::vector<size_t> order;
+                            for (size_t index = 0; index < prepared.size(); ++index)
+                                if (prepared[index].view < 0 || uint32_t(prepared[index].view) == view)
+                                    order.push_back(index);
                             std::shuffle(order.begin(), order.end(), randomOrder);
                             for (size_t index : order)
                                 measure(

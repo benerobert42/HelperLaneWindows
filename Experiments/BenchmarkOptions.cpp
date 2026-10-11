@@ -98,6 +98,9 @@ Options parse(int argc, char** argv)
     }
     if (o.axisSteps)
         o.views = 3 * o.axisSteps;
+    for (const auto& method : o.methods)
+        if ((method == "HeapQuadView" || method == "HeapQuadLag") && !o.axisSteps)
+            throw std::runtime_error("Single-pose projected methods require --rotation-axes.");
     if (!o.samples || !o.views || !o.blocks || !o.instances || !o.width || !o.height || o.shapes.empty() || o.methods.empty() ||
         o.msaa.empty())
         throw std::runtime_error("Performance options must be nonzero/nonempty.");
