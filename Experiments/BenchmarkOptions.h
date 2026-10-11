@@ -22,4 +22,5 @@ struct Options
 };
 Options parse(int argc, char** argv);
 std::array<double, 3> rotationDegrees(const Options& options, uint32_t view);
+bool isViewMethod(const std::string& method);
 } // namespace BenchmarkOptions

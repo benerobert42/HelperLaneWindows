@@ -99,7 +99,7 @@ Options parse(int argc, char** argv)
     if (o.axisSteps)
         o.views = 3 * o.axisSteps;
     for (const auto& method : o.methods)
-        if ((method == "HeapQuadView" || method == "HeapQuadLag") && !o.axisSteps)
+        if (isViewMethod(method) && !o.axisSteps)
             throw std::runtime_error("Single-pose projected methods require --rotation-axes.");
     if (!o.samples || !o.views || !o.blocks || !o.instances || !o.width || !o.height || o.shapes.empty() || o.methods.empty() ||
         o.msaa.empty())
@@ -125,5 +125,9 @@ std::array<double, 3> rotationDegrees(const Options& o, uint32_t view)
     std::array<double, 3> angles{};
     angles.at(view / o.axisSteps) = 360.0 * (view % o.axisSteps) / o.axisSteps;
     return angles;
+}
+bool isViewMethod(const std::string& method)
+{
+    return method == "HeapQuadView" || method == "HeapQuadLag" || method == "HeapQuadWarm" || method == "HeapQuadWarmLag";
 }
 } // namespace BenchmarkOptions

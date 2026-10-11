@@ -76,6 +76,8 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"Protocol", "4"},
         {"QueueDepth", number(c.queueDepth)},
         {"OptimizationView", number(c.optimizationView)},
+        {"ObjectiveInstances", number(c.objectiveInstances)},
+        {"ConnectivitySeed", BenchmarkSupport::csvField(c.connectivitySeed)},
         {"PassScope", BenchmarkSupport::csvField(c.passScope)},
         {"CPUScope", BenchmarkSupport::csvField(c.cpuScope)},
         {"Warmup", number(c.warmup)},

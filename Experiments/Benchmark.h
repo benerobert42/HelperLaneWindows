@@ -22,9 +22,11 @@ struct Case
     uint32_t gridCols = 1, gridRows = 1, gridLayers = 1, warmup = 0, samples = 1;
     uint32_t queueDepth = 1;
     int32_t optimizationView = -1;
+    uint32_t objectiveInstances = 0;
     double xRotation = 0, yRotation = 0, zRotation = 0, radius = 0;
     bool depth = true, meshopt = false, surfaceLocalFlips = false;
     std::string geometry, method, shader, cpuScope, passScope;
+    std::string connectivitySeed = "Source";
     MeshMetrics mesh;
 };
 
