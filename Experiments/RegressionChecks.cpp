@@ -3,6 +3,7 @@
 #include "Triangulation/MeshValidation.h"
 #include "Triangulation/2D/TriangulationHelpers.h"
 #include "Experiments/BenchmarkGeometry.h"
+#include "Experiments/RasterMetrics.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 #include "Triangulation/GeometryMath.h"
 #include <filesystem>
@@ -26,6 +27,7 @@ int runRegressionChecks()
     using namespace TriangulationCommon;
     try
     {
+        RasterMetrics::regressionChecks();
         std::vector<Vertex> projected(4);
         projected[0].pos = Falcor::float2(0, 0);
         projected[1].pos = Falcor::float2(2, 0);

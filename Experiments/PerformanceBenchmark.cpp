@@ -3,6 +3,7 @@
 #include "BenchmarkGeometry.h"
 #include "BenchmarkOptions.h"
 #include "Benchmark.h"
+#include "RasterMetrics.h"
 #include "Rendering/LitPreview.h"
 #include "Triangulation/MeshValidation.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
@@ -42,6 +43,7 @@ struct Prepared
     ref<Vao> vao;
     std::array<std::unique_ptr<LitPreview>, 2> lit;
     bool valid = false;
+    std::map<uint32_t, RasterMetrics::Metrics> rasterMetrics;
 };
 struct Params
 {
@@ -61,6 +63,7 @@ class PerformanceApp : public SampleApp
     Options o;
     std::unique_ptr<Benchmark::Runner> runner;
     std::unique_ptr<Benchmark::Writer> writer;
+    std::ofstream rasterOutput;
     ref<GraphicsState> state;
     ref<Texture> texture, counters;
     ref<Sampler> sampler;
@@ -171,26 +174,17 @@ class PerformanceApp : public SampleApp
         if (o.meshopt && !p.mesh.indices.empty())
         {
             meshopt_optimizeVertexCache(p.mesh.indices.data(), p.mesh.indices.data(), p.mesh.indices.size(), p.mesh.vertices.size());
-            meshopt_optimizeOverdraw(
-                p.mesh.indices.data(),
-                p.mesh.indices.data(),
-                p.mesh.indices.size(),
-                &p.mesh.vertices[0].x,
-                p.mesh.vertices.size(),
-                sizeof(float3),
-                1.05f
-            );
-            // Lit normals use source vertex IDs. Cache/overdraw reordering keeps
-            // those IDs; vertex-fetch remapping would require remapping normals.
-            if (!o.lit)
-                meshopt_optimizeVertexFetch(
-                    p.mesh.vertices.data(),
+            if (o.ordering == "cache-overdraw")
+                meshopt_optimizeOverdraw(
+                    p.mesh.indices.data(),
                     p.mesh.indices.data(),
                     p.mesh.indices.size(),
-                    p.mesh.vertices.data(),
+                    &p.mesh.vertices[0].x,
                     p.mesh.vertices.size(),
-                    sizeof(float3)
+                    sizeof(float3),
+                    1.05f
                 );
+            // Keep vertex storage fixed in every workload to isolate index ordering.
         }
         p.vao = upload(p.mesh);
         if (o.lit && p.vao)
@@ -263,6 +257,8 @@ class PerformanceApp : public SampleApp
         c.view = view;
         c.msaa = msaa;
         c.shader = o.lit ? "LitPreview" : stress ? "Material16" : "Texture1";
+        if (o.explicitLod)
+            c.shader += "ExplicitLOD";
         c.instances = o.instances;
         c.width = o.width;
         c.height = o.height;
@@ -286,7 +282,7 @@ class PerformanceApp : public SampleApp
         c.mesh.referenceError = p.referenceError;
         c.mesh.flips = p.flips;
         c.mesh.valid = p.valid;
-        c.mesh.projectedEdgeLength = computeProjectedEdgeLengthScreenSpace(
+        c.mesh.projectedEdgeLength = o.rasterMetrics ? p.rasterMetrics.at(view).edgeLength : computeProjectedEdgeLengthScreenSpace(
             p.mesh.vertices,
             p.mesh.indices,
             params.model,
@@ -367,6 +363,8 @@ class PerformanceApp : public SampleApp
         }
         const auto& result = runner->result();
         writer->write(result);
+        if (o.rasterMetrics)
+            RasterMetrics::write(rasterOutput, result.description.id, o.ordering, p.rasterMetrics.at(view));
         if (!captured && p.name == "Source" && msaa == 1 && stress == 0)
         {
             // Diagnostics alter the target: capture the original uninstrumented workload.
@@ -404,7 +402,7 @@ public:
             "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, midpoints and centroids sampled."
             "\nHeapPlane: diagonal length reduction minus 4 * quad plane residual."
             "\nTexture: deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap."
-            "\nShaders: 1 implicit sample or 16 dependent implicit samples."
+            "\nTexture shaders: 1 sample or 16 dependent samples; implicit LOD or explicit LOD 0 as selected."
             "\nEdge length: unique geometric edges per mesh; projected Euclidean pixel lengths summed over all instances, including "
             "occluded edges."
             "\nLit: existing GraphEx raster preview, fixed source normals, default single point light; early depth for opaque timed and "
@@ -412,9 +410,20 @@ public:
             "\nHeapScreen/HeapQuad: 25% world length + 75% normalized mean projected Euclidean/L1 length, fixed view set, central "
             "representative instance."
             "\nSourceControl: identical source geometry, independently uploaded, randomized with other methods."
-            "\nMeshopt: cache + overdraw reordering; vertex-fetch remap only for texture workloads."
+            "\nMeshopt: selected index ordering only; vertex storage is fixed in every workload."
             "\nLit helpers: diagnostic raster quad-waste proxy; the timed lit shader has no derivatives/quad operations."
+            "\nRaster metrics: pre-depth, unclipped projected triangles; area/shape include occluded faces."
+            "\nCache simulation: meshoptimizer cache=16, warp=32, primitive group=128; not hardware counters."
+            "\nOrdering: " + o.ordering + "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod)
         );
+        if (o.rasterMetrics)
+        {
+            auto path = o.output;
+            path.replace_extension(".raster.csv");
+            rasterOutput.exceptions(std::ios::failbit | std::ios::badbit);
+            rasterOutput.open(path);
+            RasterMetrics::writeHeader(rasterOutput);
+        }
         const auto info = getDevice()->getInfo();
         std::cout << "GPU: " << info.adapterName << " (" << info.apiName << ")" << std::endl;
         state = GraphicsState::create(getDevice());
@@ -447,6 +456,7 @@ public:
                 p.program = Program::create(getDevice(), desc);
                 p.program->addDefine("MATERIAL_STRESS", std::to_string(stress));
                 p.program->addDefine("DIAGNOSTICS", std::to_string(diagnostic));
+                p.program->addDefine("EXPLICIT_LOD", std::to_string(o.explicitLod));
                 p.vars = ProgramVars::create(getDevice(), p.program.get());
                 p.vars->setTexture("gTexture", texture);
                 p.vars->getRootVar()["gSampler"] = sampler;
@@ -496,6 +506,19 @@ public:
                 spacing,
                 0.5f * float(cols - 1),
                 o.instances};
+            // Geometry diagnostics run once per method/view before GPU priming.
+            // No CPU projection work is inserted between timed blocks.
+            if (o.rasterMetrics)
+                for (auto& p : prepared)
+                    if (p.vao)
+                        for (uint32_t view = 0; view < o.views; ++view)
+                        {
+                            const auto model = mul(
+                                math::matrixFromRotationX(math::radians(22.5f + 45.f * (view % 2))),
+                                math::matrixFromRotationY(math::radians(11.25f + 90.f * (view / 2)))
+                            );
+                            p.rasterMetrics.emplace(view, RasterMetrics::measure(p.mesh, model, vp, o.width, o.height, o.instances, cols, spacing));
+                        }
             // Build every PSO and normal buffer before timing; diagnostics do not
             // first compile between measured cases. Then sustain GPU activity.
             for (auto& p : prepared)
@@ -566,6 +589,8 @@ public:
                     }
                 }
         }
+        if (o.rasterMetrics)
+            rasterOutput.close();
         writer->finish(true, "Benchmark complete.");
         std::cout << "Benchmark complete: " << writer->caseCount() << " cases, " << o.output.string() << std::endl;
         shutdown();

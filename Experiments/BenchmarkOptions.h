@@ -14,6 +14,8 @@ struct Options
     std::vector<std::string> methods = {"Source", "CDT", "CDTFlip", "Greedy", "LMT", "GP", "Heap3D", "HeapPlane"};
     bool depth = true, meshopt = false, quick = false;
     bool lit = false;
+    bool explicitLod = false, rasterMetrics = false;
+    std::string ordering = "native";
     uint32_t queueDepth = 1;
 };
 Options parse(int argc, char** argv);

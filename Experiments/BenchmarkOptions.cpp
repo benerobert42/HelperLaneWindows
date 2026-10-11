@@ -64,7 +64,13 @@ Options parse(int argc, char** argv)
         else if (a == "--no-depth")
             o.depth = false;
         else if (a == "--meshopt")
-            o.meshopt = true;
+            o.ordering = "cache-overdraw";
+        else if (a == "--ordering")
+            o.ordering = value();
+        else if (a == "--explicit-lod")
+            o.explicitLod = true;
+        else if (a == "--raster-metrics")
+            o.rasterMetrics = true;
         else if (a == "--lit")
             o.lit = true;
         else if (a == "--queue-depth")
@@ -94,6 +100,11 @@ Options parse(int argc, char** argv)
         throw std::runtime_error("Queue depth must be 1..32.");
     if (o.lit && !o.depth)
         throw std::runtime_error("Lit comparisons require depth.");
+    if (o.ordering != "native" && o.ordering != "cache" && o.ordering != "cache-overdraw")
+        throw std::runtime_error("Ordering must be native, cache or cache-overdraw.");
+    o.meshopt = o.ordering != "native";
+    if (o.lit && o.explicitLod)
+        throw std::runtime_error("Explicit LOD applies only to the texture benchmark.");
     return o;
 }
 } // namespace BenchmarkOptions
