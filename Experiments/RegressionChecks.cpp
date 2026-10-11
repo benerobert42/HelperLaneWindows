@@ -4,6 +4,7 @@
 #include "Triangulation/2D/TriangulationHelpers.h"
 #include "Experiments/BenchmarkGeometry.h"
 #include "Experiments/RasterMetrics.h"
+#include "Experiments/BenchmarkOptions.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
 #include "Triangulation/GeometryMath.h"
 #include <filesystem>
@@ -28,6 +29,15 @@ int runRegressionChecks()
     try
     {
         RasterMetrics::regressionChecks();
+        BenchmarkOptions::Options sweep;
+        sweep.axisSteps = 8;
+        for (uint32_t axis = 0; axis < 3; ++axis)
+            for (uint32_t step = 0; step < 8; ++step)
+            {
+                const auto angles = BenchmarkOptions::rotationDegrees(sweep, axis * 8 + step);
+                for (uint32_t component = 0; component < 3; ++component)
+                    require(angles[component] == (component == axis ? step * 45.0 : 0), "Axis sweep must rotate just the requested axis");
+            }
         std::vector<Vertex> projected(4);
         projected[0].pos = Falcor::float2(0, 0);
         projected[1].pos = Falcor::float2(2, 0);

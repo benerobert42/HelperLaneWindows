@@ -43,6 +43,12 @@ Options parse(int argc, char** argv)
             o.warmup = parseCount(value());
         else if (a == "--views")
             o.views = parseCount(value());
+        else if (a == "--rotation-axes")
+        {
+            o.axisSteps = parseCount(value());
+            if (!o.axisSteps || o.axisSteps > 360)
+                throw std::runtime_error("Rotation axis steps must be 1..360.");
+        }
         else if (a == "--blocks")
             o.blocks = parseCount(value());
         else if (a == "--instances")
@@ -90,6 +96,8 @@ Options parse(int argc, char** argv)
         o.shapes = {"sphere"};
         o.methods = {"Source", "CDT", "CDTFlip", "Heap3D", "HeapPlane"};
     }
+    if (o.axisSteps)
+        o.views = 3 * o.axisSteps;
     if (!o.samples || !o.views || !o.blocks || !o.instances || !o.width || !o.height || o.shapes.empty() || o.methods.empty() ||
         o.msaa.empty())
         throw std::runtime_error("Performance options must be nonzero/nonempty.");
@@ -106,5 +114,13 @@ Options parse(int argc, char** argv)
     if (o.lit && o.explicitLod)
         throw std::runtime_error("Explicit LOD applies only to the texture benchmark.");
     return o;
+}
+std::array<double, 3> rotationDegrees(const Options& o, uint32_t view)
+{
+    if (!o.axisSteps)
+        return {22.5 + 45 * (view % 2), 11.25 + 90 * (view / 2), 0};
+    std::array<double, 3> angles{};
+    angles.at(view / o.axisSteps) = 360.0 * (view % o.axisSteps) / o.axisSteps;
+    return angles;
 }
 } // namespace BenchmarkOptions

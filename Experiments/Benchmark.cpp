@@ -78,6 +78,7 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"Warmup", number(c.warmup)},
         {"XRotationDegrees", number(c.xRotation)},
         {"YRotationDegrees", number(c.yRotation)},
+        {"ZRotationDegrees", number(c.zRotation)},
         {"GridCols", number(c.gridCols)},
         {"GridRows", number(c.gridRows)},
         {"GridLayers", number(c.gridLayers)},

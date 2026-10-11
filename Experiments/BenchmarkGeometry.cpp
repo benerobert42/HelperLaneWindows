@@ -11,9 +11,23 @@ using Falcor::float3;
 
 Triangulation3D::Mesh make(const std::string& name)
 {
-    if (name == "suzanne" || name == "bunny" || name == "teapot")
+    if (name == "ellipse2d")
     {
-        auto result = ObjMeshLoader::load(getModelPresetPath(name == "suzanne" ? 8 : name == "bunny" ? 9 : 10).string());
+        Triangulation3D::Mesh mesh;
+        mesh.faces.emplace_back();
+        for (uint32_t i = 0; i < 512; ++i)
+        {
+            const float angle = 6.28318530718f * float(i) / 512;
+            mesh.vertices.emplace_back(0.4f * std::cos(angle), 0.2f * std::sin(angle), 0.f);
+            mesh.faces.back().push_back(i);
+        }
+        return mesh;
+    }
+    if (name.rfind("obj:", 0) == 0 || name == "suzanne" || name == "bunny" || name == "teapot")
+    {
+        const auto path = name.rfind("obj:", 0) == 0 ? std::filesystem::path(name.substr(4))
+            : getModelPresetPath(name == "suzanne" ? 8 : name == "bunny" ? 9 : 10);
+        auto result = ObjMeshLoader::load(path.string());
         if (!result.success)
             throw std::runtime_error(result.message);
         return std::move(result.mesh);

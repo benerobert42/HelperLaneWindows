@@ -10,6 +10,7 @@ struct Metrics
 {
     uint64_t triangles = 0, outside = 0, subpixel = 0, belowFour = 0, thin = 0, sliver = 0;
     double area = 0, bboxArea = 0, edgeL1 = 0, edgeLength = 0, acmr = 0, atvr = 0;
+    double minAltitudeSum = 0, shapeQualitySum = 0;
 };
 Metrics measure(
     const Triangulation3D::MeshTriangulationResult& mesh,

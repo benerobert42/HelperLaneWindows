@@ -72,6 +72,13 @@ class PerformanceApp : public SampleApp
     std::vector<uint32_t> sourceIndices;
     LitPreviewSettings lighting;
     float3 cameraPosition;
+    float4x4 modelForView(uint32_t view) const
+    {
+        const auto angles = BenchmarkOptions::rotationDegrees(o, view);
+        return mul(mul(math::matrixFromRotationX(math::radians(float(angles[0]))),
+                       math::matrixFromRotationY(math::radians(float(angles[1])))),
+                   math::matrixFromRotationZ(math::radians(float(angles[2]))));
+    }
     ref<Vao> upload(const MeshResult& m)
     {
         if (m.indices.empty())
@@ -115,9 +122,7 @@ class PerformanceApp : public SampleApp
                 std::vector<std::vector<float2>> screens;
                 for (uint32_t view = 0; view < o.views; ++view)
                 {
-                    auto model =
-                        mul(math::matrixFromRotationX(math::radians(22.5f + 45.f * (view % 2))),
-                            math::matrixFromRotationY(math::radians(11.25f + 90.f * (view / 2))));
+                    const auto model = modelForView(view);
                     screens.emplace_back(source.vertices.size());
                     for (size_t i = 0; i < source.vertices.size(); ++i)
                         if (!projectToScreenSpace(
@@ -269,8 +274,10 @@ class PerformanceApp : public SampleApp
         c.queueDepth = o.queueDepth;
         c.gridCols = params.gridCols;
         c.gridRows = (o.instances + params.gridCols - 1) / params.gridCols;
-        c.xRotation = 22.5 + 45 * (view % 2);
-        c.yRotation = 11.25 + 90 * (view / 2);
+        const auto angles = BenchmarkOptions::rotationDegrees(o, view);
+        c.xRotation = angles[0];
+        c.yRotation = angles[1];
+        c.zRotation = angles[2];
         c.passScope = "ClearDraw";
         c.cpuScope = "ConstructionExcludingFinalAuditUpload";
         c.mesh.audit = p.check;
@@ -414,7 +421,9 @@ public:
             "\nLit helpers: diagnostic raster quad-waste proxy; the timed lit shader has no derivatives/quad operations."
             "\nRaster metrics: pre-depth, unclipped projected triangles; area/shape include occluded faces."
             "\nCache simulation: meshoptimizer cache=16, warp=32, primitive group=128; not hardware counters."
-            "\nOrdering: " + o.ordering + "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod)
+            "\nOrdering: " + o.ordering + "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod) +
+            "\nSeparate-axis rotation steps: " + std::to_string(o.axisSteps) +
+            "; model = Rx * Ry * Rz; randomized view order for axis sweeps."
         );
         if (o.rasterMetrics)
         {
@@ -501,7 +510,7 @@ public:
             const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, spacing, radius, &cameraPosition);
             const Params prime{
                 vp,
-                mul(math::matrixFromRotationX(math::radians(22.5f)), math::matrixFromRotationY(math::radians(11.25f))),
+                modelForView(0),
                 cols,
                 spacing,
                 0.5f * float(cols - 1),
@@ -513,10 +522,7 @@ public:
                     if (p.vao)
                         for (uint32_t view = 0; view < o.views; ++view)
                         {
-                            const auto model = mul(
-                                math::matrixFromRotationX(math::radians(22.5f + 45.f * (view % 2))),
-                                math::matrixFromRotationY(math::radians(11.25f + 90.f * (view / 2)))
-                            );
+                            const auto model = modelForView(view);
                             p.rasterMetrics.emplace(view, RasterMetrics::measure(p.mesh, model, vp, o.width, o.height, o.instances, cols, spacing));
                         }
             // Build every PSO and normal buffer before timing; diagnostics do not
@@ -553,12 +559,16 @@ public:
             } while (std::chrono::duration<double>(Clock::now() - primeStart).count() < 1);
             context->submit(true);
             for (uint32_t block = 0; block < o.blocks; ++block)
-                for (uint32_t view = 0; view < o.views; ++view)
+            {
+                std::vector<uint32_t> views(o.views);
+                std::iota(views.begin(), views.end(), 0);
+                if (o.axisSteps)
+                    std::shuffle(views.begin(), views.end(), randomOrder);
+                for (uint32_t view : views)
                 {
-                    float yAngle = math::radians(11.25f + 90.0f * float(view / 2)), xAngle = math::radians(22.5f + 45.0f * float(view % 2));
                     Params params{
                         vp,
-                        mul(math::matrixFromRotationX(xAngle), math::matrixFromRotationY(yAngle)),
+                        modelForView(view),
                         cols,
                         spacing,
                         0.5f * float(cols - 1),
@@ -588,6 +598,7 @@ public:
                         }
                     }
                 }
+            }
         }
         if (o.rasterMetrics)
             rasterOutput.close();

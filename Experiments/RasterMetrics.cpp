@@ -51,6 +51,11 @@ Metrics measure(
             m.belowFour += area < 4;
             m.thin += longest2 <= 1e-20 || 2 * area < std::sqrt(longest2); // minimum altitude below one pixel
             m.sliver += longest2 <= 1e-20 || 2 * area < 0.1 * longest2; // scale-independent shape ratio
+            if (longest2 > 1e-20)
+            {
+                m.minAltitudeSum += 2 * area / std::sqrt(longest2);
+                m.shapeQualitySum += 2 * area / longest2;
+            }
         }
     }
     return m;
@@ -79,6 +84,8 @@ static void writeRow(std::ostream& out, uint32_t caseId, const std::string& orde
     field("SliverTriangles", m.sliver);
     field("CacheSimACMR", m.acmr);
     field("CacheSimATVR", m.atvr);
+    field("MeanMinAltitude_px", m.triangles ? m.minAltitudeSum / m.triangles : 0);
+    field("MeanShapeQuality", m.triangles ? m.shapeQualitySum / m.triangles : 0);
     out << '\n';
 }
 void writeHeader(std::ostream& out) { writeRow(out, 0, "", {}, true); }
@@ -93,7 +100,9 @@ void regressionChecks()
     const auto b = measure(triangle, identity, identity, 16, 16, 2, 2, 0);
     if (a.triangles != 1 || a.area != 2 || a.bboxArea != 4 || a.edgeL1 != 8 || a.belowFour != 1 || a.subpixel != 0 ||
         a.outside != 0 || std::abs(a.acmr - 3) > 1e-6 || b.triangles != 2 || b.area != 8 * a.area || b.edgeL1 != 4 * a.edgeL1 ||
-        std::abs(b.edgeLength - 4 * a.edgeLength) > 1e-9)
+        std::abs(b.edgeLength - 4 * a.edgeLength) > 1e-9 || std::abs(a.shapeQualitySum - 0.5) > 1e-9 ||
+        std::abs(b.shapeQualitySum - 2 * a.shapeQualitySum) > 1e-9 ||
+        std::abs(b.minAltitudeSum - 4 * a.minAltitudeSum) > 1e-9)
         throw std::runtime_error("Projected metrics must scale with resolution and instance count.");
 }
 } // namespace RasterMetrics
