@@ -1,6 +1,7 @@
 #pragma once
 #include "Falcor.h"
 #include "BenchmarkSupport.h"
+#include "PipelineStatistics.h"
 #include "Triangulation/MeshValidation.h"
 #include <filesystem>
 #include <fstream>
@@ -11,9 +12,17 @@ namespace Benchmark
 struct MeshMetrics
 {
     MeshValidation::Audit audit;
-    uint32_t vertices = 0, triangles = 0, sourceTriangles = 0, failedPatches = 0, flips = 0;
+    uint32_t vertices = 0, triangles = 0, sourceTriangles = 0, failedPatches = 0, flips = 0, starReplacements = 0;
     double cpuMs = 0, setupMs = 0, referenceSetupMs = 0, referenceError = 0, projectedEdgeLength = 0;
     bool valid = false;
+    double reverseReferenceError = 0, referenceBudget = 0;
+    bool surfaceEquivalent = true;
+    std::string experimentClass = "Strict";
+    int32_t triangulationStatus = -1;
+    uint32_t patchCount = 0, changedTriangles = 0;
+    bool structuralValid = false;
+    uint32_t referenceAuditDirections = 0;
+    double sourceSetupMs = 0, patchSetupMs = 0;
 };
 
 struct Case
@@ -37,6 +46,7 @@ struct Sample
 struct Counts
 {
     uint32_t helpers = 0, active = 0;
+    PipelineCounts pipeline;
 };
 struct Result
 {

@@ -7,6 +7,7 @@
 #include "Rendering/LitPreview.h"
 #include "Triangulation/MeshValidation.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
+#include "Triangulation/3D/SurfaceStarExperiment.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include "meshoptimizer.h"
 #include <algorithm>
@@ -20,6 +21,7 @@
 #include <random>
 #include <stdexcept>
 #include <unordered_map>
+#include <set>
 
 namespace
 {
@@ -40,9 +42,14 @@ struct Prepared
     MeshResult mesh;
     Audit check;
     double cpuMs = 0, setupMs = 0, referenceError = 0;
+    double reverseReferenceError = 0, referenceBudget = 0;
+    bool surfaceEquivalent = true;
+    std::string experimentClass = "Strict";
+    bool structuralValid = false;
+    uint32_t changedTriangles = 0;
     int32_t view = -1, optimizationView = -1;
     uint32_t objectiveInstances = 0;
-    uint32_t failed = 0, flips = 0;
+    uint32_t failed = 0, flips = 0, starReplacements = 0;
     ref<Vao> vao;
     std::array<std::unique_ptr<LitPreview>, 2> lit;
     bool valid = false;
@@ -66,6 +73,7 @@ class PerformanceApp : public SampleApp
     Options o;
     std::unique_ptr<Benchmark::Runner> runner;
     std::unique_ptr<Benchmark::Writer> writer;
+    std::unique_ptr<PipelineStatistics> pipelineStatistics;
     std::ofstream rasterOutput;
     ref<GraphicsState> state;
     ref<Texture> texture, counters;
@@ -76,6 +84,10 @@ class PerformanceApp : public SampleApp
     LitPreviewSettings lighting;
     float3 cameraPosition;
     double referenceSetupMs = 0;
+    double sourceSetupMs = 0, patchSetupMs = 0;
+    std::vector<Triangulation3D::Patch> cachedPatches;
+    uint32_t sourceUsed = 0;
+    std::set<std::array<uint32_t, 3>> sourceTriangleSet;
     float4x4 modelForView(uint32_t view) const
     {
         const auto angles = BenchmarkOptions::rotationDegrees(o, view);
@@ -116,10 +128,36 @@ class PerformanceApp : public SampleApp
         if (name == "HeapQuadLag" || name == "HeapQuadWarmLag")
             p.optimizationView = (view / o.axisSteps) * o.axisSteps + (view + o.axisSteps - 1) % o.axisSteps;
         auto start = Clock::now();
+        SurfaceFlipExperiment::Constraints constraints;
+        if (name == "HeapLoose" || name == "StarLoose") constraints.relativeError = 0.005;
+        if (name == "HeapWide" || name == "StarWide") constraints.relativeError = 0.02;
+        p.referenceBudget = errorLimit * constraints.relativeError / 0.001;
+        if (constraints.relativeError > 0.001) p.experimentClass = "RelaxedGeometry";
         if (name == "Source" || name == "SourceControl")
-            p.mesh = Triangulation3D::useSourceMeshTriangulation(input);
+            p.mesh = source;
+        else if (name == "TopologySplit")
+        {
+            p.mesh = BenchmarkGeometry::splitTorus(source);
+            p.experimentClass = "TopologyChange";
+            p.referenceBudget = errorLimit * 1000;
+        }
+        else if (name == "GridAligned" || name == "GridOpposite")
+        {
+            p.mesh = BenchmarkGeometry::rewriteGrid(input, source, name == "GridAligned");
+            p.experimentClass = "GlobalConnectivity";
+            p.referenceBudget = errorLimit * 20;
+        }
+        else if (name == "Star3D" || name == "StarLoose" || name == "StarWide")
+        {
+            auto heap = SurfaceFlipExperiment::optimize(source, reference, 0, {}, constraints);
+            auto star = SurfaceStarExperiment::optimize(heap.mesh, reference, constraints);
+            auto settled = SurfaceFlipExperiment::optimize(star.mesh, reference, 0, {}, constraints);
+            p.mesh = std::move(settled.mesh);
+            p.flips = heap.flips + settled.flips;
+            p.starReplacements = star.replacements;
+        }
         else if (name == "Heap3D" || name == "HeapPlane" || name == "HeapScreen" || name == "HeapQuad" ||
-                 name == "HeapQuadSet" || BenchmarkOptions::isViewMethod(name))
+                 name == "HeapQuadSet" || name == "HeapLoose" || name == "HeapWide" || BenchmarkOptions::isViewMethod(name))
         {
             std::function<double(uint32_t, uint32_t)> edgeCost;
             if (name == "HeapScreen" || name == "HeapQuad" || name == "HeapQuadSet" || view >= 0)
@@ -178,33 +216,47 @@ class PerformanceApp : public SampleApp
                            (uint32_t a, uint32_t b) mutable
                 { return worldWeight * length(source.vertices[a] - source.vertices[b]) + (1 - worldWeight) * scale * projectedCost(a, b); };
             }
-            auto r = SurfaceFlipExperiment::optimize(seed ? *seed : source, reference, name == "HeapPlane" ? 4.0 : 0.0, edgeCost);
+            auto r = SurfaceFlipExperiment::optimize(seed ? *seed : source, reference, name == "HeapPlane" ? 4.0 : 0.0, edgeCost, constraints);
             p.mesh = std::move(r.mesh);
             p.flips = r.flips;
         }
         else
         {
             Triangulation3D::TriangulationOptions options;
+            p.experimentClass = "PatchRetriangulation";
+            p.referenceBudget = errorLimit * 20;
+            options.use3DEdgeLengthForFlips = name == "CDTFlip3D" || name == "LMT3D";
             if (name == "CDT")
                 options.method = Triangulation3D::Method::ConstrainedDelaunay;
-            else if (name == "CDTFlip")
+            else if (name == "CDTFlip" || name == "CDTFlip3D")
                 options.method = Triangulation3D::Method::ConstrainedDelaunayFlipped;
             else if (name == "Greedy")
                 options.method = Triangulation3D::Method::GreedyPointSet;
-            else if (name == "LMT")
+            else if (name == "LMT" || name == "LMT3D")
                 options.method = Triangulation3D::Method::LmtMinimumWeight;
             else if (name == "GP")
                 options.method = Triangulation3D::Method::PclGreedyProjection;
             else
                 throw std::runtime_error("Unknown method: " + name);
-            p.mesh = Triangulation3D::triangulateMesh(input, {}, options);
+            p.mesh = Triangulation3D::triangulatePreparedMesh(input, source, cachedPatches, options);
             p.failed = p.mesh.failedPatchCount;
         }
         p.cpuMs = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
         p.check = audit(p.mesh, source);
         p.referenceError = reference.sampledError(p.mesh);
-        p.valid = p.mesh.success && p.mesh.indices.size() == source.indices.size() && p.check.topologyOK() && !p.failed &&
-                  p.referenceError <= errorLimit * 1.001;
+        if (p.mesh.indices != source.indices && !p.mesh.indices.empty())
+            p.reverseReferenceError = SurfaceFlipExperiment::ReferenceSurface(p.mesh).sampledError(source);
+        p.surfaceEquivalent = std::max(p.referenceError, p.reverseReferenceError) <= errorLimit * 1.001;
+        p.structuralValid = p.mesh.success && p.mesh.indices.size() == source.indices.size() && p.check.topologyOK() &&
+                            p.check.used == sourceUsed;
+        p.valid = p.structuralValid && !p.failed &&
+                  std::max(p.referenceError, p.reverseReferenceError) <= p.referenceBudget * 1.001;
+        for (size_t i = 0; i < p.mesh.indices.size(); i += 3)
+        {
+            std::array<uint32_t, 3> triangle{p.mesh.indices[i], p.mesh.indices[i + 1], p.mesh.indices[i + 2]};
+            std::sort(triangle.begin(), triangle.end());
+            p.changedTriangles += !sourceTriangleSet.count(triangle);
+        }
         if (o.meshopt && !p.mesh.indices.empty())
         {
             meshopt_optimizeVertexCache(p.mesh.indices.data(), p.mesh.indices.data(), p.mesh.indices.size(), p.mesh.vertices.size());
@@ -321,8 +373,20 @@ class PerformanceApp : public SampleApp
         c.mesh.cpuMs = p.cpuMs;
         c.mesh.setupMs = p.setupMs;
         c.mesh.referenceSetupMs = referenceSetupMs;
+        c.mesh.sourceSetupMs = sourceSetupMs;
+        c.mesh.patchSetupMs = patchSetupMs;
+        c.mesh.referenceAuditDirections = 2;
         c.mesh.failedPatches = p.failed;
         c.mesh.referenceError = p.referenceError;
+        c.mesh.reverseReferenceError = p.reverseReferenceError;
+        c.mesh.referenceBudget = p.referenceBudget;
+        c.mesh.surfaceEquivalent = p.surfaceEquivalent;
+        c.mesh.experimentClass = p.experimentClass;
+        c.mesh.starReplacements = p.starReplacements;
+        c.mesh.triangulationStatus = int32_t(p.mesh.status);
+        c.mesh.patchCount = uint32_t(p.mesh.patches.size());
+        c.mesh.changedTriangles = p.changedTriangles;
+        c.mesh.structuralValid = p.structuralValid;
         c.mesh.flips = p.flips;
         c.mesh.valid = p.valid;
         c.mesh.projectedEdgeLength = o.rasterMetrics ? p.rasterMetrics.at(view).edgeLength : computeProjectedEdgeLengthScreenSpace(
@@ -376,6 +440,10 @@ class PerformanceApp : public SampleApp
         };
         work.diagnose = [&]
         {
+            work.clear();
+            const bool queried = pipelineStatistics->begin(context);
+            work.draw();
+            if (queried) pipelineStatistics->endResolve(context);
             context->clearFbo(fbo.get(), float4(0), 1, 0);
             context->clearUAV(counters->getUAV().get(), uint4(0));
             if (o.lit)
@@ -384,7 +452,8 @@ class PerformanceApp : public SampleApp
                 draw(context, fbo, p, pipelines[stress][1], params);
             const auto bytes = context->readTextureSubresource(counters.get(), 0);
             const auto counts = reinterpret_cast<const uint32_t*>(bytes.data());
-            return Benchmark::Counts{counts[0], counts[1]};
+            // Texture readback above waits for the preceding native query resolve.
+            return Benchmark::Counts{counts[0], counts[1], queried ? pipelineStatistics->read() : PipelineCounts{}};
         };
         runner->start(std::move(c));
         bool complete;
@@ -408,7 +477,7 @@ class PerformanceApp : public SampleApp
         writer->write(result);
         if (o.rasterMetrics)
             RasterMetrics::write(rasterOutput, result.description.id, o.ordering, p.rasterMetrics.at(view));
-        if (!captured && p.name == "Source" && msaa == 1 && stress == 0)
+        if (!captured && p.name == o.captureMethod && msaa == 1 && stress == 0)
         {
             // Diagnostics alter the target: capture the original uninstrumented workload.
             work.clear();
@@ -435,6 +504,7 @@ public:
     {
         getDevice()->getProfiler()->setEnabled(false);
         runner = std::make_unique<Benchmark::Runner>(getDevice());
+        pipelineStatistics = std::make_unique<PipelineStatistics>(getDevice().get());
         writer = std::make_unique<Benchmark::Writer>(
             o.output,
             *getDevice(),
@@ -445,7 +515,17 @@ public:
             "\nSetupCPU_ms: CLI preparation through audit, index ordering and VAO/buffer creation; excludes shared source/reference "
             "setup, lazy lighting/PSO initialization, GPU upload completion and diagnostics. GUI reports zero (unmeasured)."
             "\nReferenceSetupCPU_ms: shared fixed-source reference construction once per geometry; reuse across view updates."
+            "\nSourceSetupCPU_ms/PatchSetupCPU_ms: shared canonical source/patch growth once per geometry; backend construction reuses both."
+            "\nReferenceAuditDirections: CLI 2; GUI volume 1; 0 unmeasured. GUI zero setup/reverse-error fields are unmeasured."
             "\nReference budget: 0.1% of fixed source bounds diagonal; vertices, midpoints and centroids sampled."
+            "\nCLI final audit samples both candidate-to-source and source-to-candidate; this is not a Hausdorff guarantee."
+            "\nPatch methods: explicit 2% audit ceiling; SurfaceEquivalent separately tests 0.1%; status 0 failed, 1 complete, 2 source fallback."
+            "\nCDTFlip3D/LMT3D opt into existing world-edge flip scoring; default CDTFlip/LMT use projected patch lengths."
+            "\nHeapLoose/HeapWide: explicit 0.5%/2% bounds-relative error budgets; same 30 degree normal guards."
+            "\nStar3D/Loose/Wide: world heap, then up to three convex vertex-star DP sweeps, then world heap; fixed counts."
+            "\nTopologySplit: torus fixture only; reclose two half-tubes as two tori, fixed vertex/triangle counts, changed surface."
+            "\nGridAligned/GridOpposite: whole procedural grid rewiring/opposite cell diagonals; fixed positions/counts, 2% error budget."
+            "\nSurfaceEquivalent records the original 0.1% sampled budget; non-equivalent cases excluded from ValidForRanking."
             "\nHeapPlane: diagonal length reduction minus 4 * quad plane residual."
             "\nTexture: deterministic nonconstant 512x512 RGBA8, one mip, linear/wrap."
             "\nTexture shaders: 1 sample or 16 dependent samples; implicit LOD or explicit LOD 0 as selected."
@@ -465,6 +545,8 @@ public:
             "\nSourceControl: identical source geometry, independently uploaded, randomized with other methods."
             "\nMeshopt: selected index ordering only; vertex storage is fixed in every workload."
             "\nLit helpers: diagnostic raster quad-waste proxy; the timed lit shader has no derivatives/quad operations."
+            "\nHardware pipeline statistics: separate uninstrumented draw after timing, same clear/depth; no query around timed draws."
+            "\nPSInvocations are API-reported invocations, not a guarantee of useful pixels or helper-lane instruction work."
             "\nRaster metrics: pre-depth, unclipped projected triangles; area/shape include occluded faces."
             "\nCache simulation: meshoptimizer cache=16, warp=32, primitive group=128; not hardware counters."
             "\nOrdering: " + o.ordering + "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod) +
@@ -531,8 +613,27 @@ public:
         for (const auto& shape : o.shapes)
         {
             auto input = BenchmarkGeometry::make(shape);
+            const auto sourceStart = Clock::now();
             auto source = Triangulation3D::useSourceMeshTriangulation(input);
+            sourceSetupMs = std::chrono::duration<double, std::milli>(Clock::now() - sourceStart).count();
+            cachedPatches.clear();
+            patchSetupMs = 0;
+            if (std::any_of(o.methods.begin(), o.methods.end(), [](const std::string& method)
+                           { return method.rfind("CDT", 0) == 0 || method.rfind("LMT", 0) == 0 || method == "Greedy" || method == "GP"; }))
+            {
+                const auto patchStart = Clock::now();
+                cachedPatches = Triangulation3D::growPatches(input);
+                patchSetupMs = std::chrono::duration<double, std::milli>(Clock::now() - patchStart).count();
+            }
             sourceIndices = source.indices;
+            sourceUsed = audit(source, source).used;
+            sourceTriangleSet.clear();
+            for (size_t i = 0; i < source.indices.size(); i += 3)
+            {
+                std::array<uint32_t, 3> triangle{source.indices[i], source.indices[i + 1], source.indices[i + 2]};
+                std::sort(triangle.begin(), triangle.end());
+                sourceTriangleSet.insert(triangle);
+            }
             if (!source.success)
                 throw std::runtime_error(
                     "Source mesh failed validation: " + shape + (source.messages.empty() ? "" : ": " + source.messages.front())
@@ -558,8 +659,8 @@ public:
                 if (warmStart)
                 {
                     const auto seed = std::find_if(prepared.begin(), prepared.end(), [](const Prepared& p) { return p.name == "Heap3D"; });
-                    if (seed == prepared.end() || !seed->valid)
-                        throw std::runtime_error("Warm projected methods require a valid Heap3D earlier in --methods.");
+                    if (seed == prepared.end() || !seed->structuralValid || seed->failed)
+                        throw std::runtime_error("Warm projected methods require a structurally valid Heap3D earlier in --methods.");
                     seedIndex = size_t(seed - prepared.begin());
                 }
                 if (BenchmarkOptions::isViewMethod(name))

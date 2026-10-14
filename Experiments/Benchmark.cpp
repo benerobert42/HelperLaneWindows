@@ -47,6 +47,8 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"ConstructionCPU_ms", number(m.cpuMs)},
         {"SetupCPU_ms", number(m.setupMs)},
         {"ReferenceSetupCPU_ms", number(m.referenceSetupMs)},
+        {"SourceSetupCPU_ms", number(m.sourceSetupMs)},
+        {"PatchSetupCPU_ms", number(m.patchSetupMs)},
         {"OutputVertices", number(m.vertices)},
         {"OutputTriangles", number(m.triangles)},
         {"SourceTriangles", number(m.sourceTriangles)},
@@ -58,13 +60,33 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"UnexpectedBoundaryEdges", number(m.audit.unexpectedBoundary)},
         {"DegenerateTriangles", number(m.audit.degenerate)},
         {"SampledReferenceError", number(m.referenceError)},
-        {"ValidForRanking", number(r.complete && m.valid && r.counts.active > 0)},
+        {"ReverseSampledReferenceError", number(m.reverseReferenceError)},
+        {"ReferenceErrorBudget", number(m.referenceBudget)},
+        {"ReferenceAuditDirections", number(m.referenceAuditDirections)},
+        {"SurfaceEquivalent", number(m.surfaceEquivalent)},
+        {"ExperimentClass", BenchmarkSupport::csvField(m.experimentClass)},
+        {"TriangulationStatus", number(m.triangulationStatus)},
+        {"PatchCount", number(m.patchCount)},
+        {"ChangedTriangles", number(m.changedTriangles)},
+        {"StructuralValid", number(m.structuralValid)},
+        {"ConnectedComponents", number(m.audit.components)},
+        {"UniqueEdges", number(m.audit.edges)},
+        {"EulerCharacteristic", number(m.audit.euler)},
+        {"MaxValence", number(m.audit.maxValence)},
+        {"ValenceVariance", number(m.audit.valenceVariance)},
+        {"ValidForRanking", number(r.complete && m.valid && m.surfaceEquivalent && r.counts.active > 0)},
         {"Flips", number(m.flips)},
+        {"StarReplacements", number(m.starReplacements)},
         {"TotalEdgeLength3D", number(m.audit.edgeLength)},
         {"TotalSceneEdgeLength3D", number(m.audit.edgeLength * c.instances)},
         {"SurfaceArea", number(m.audit.area)},
         {"DiagnosticHelpers", number(r.counts.helpers)},
         {"DiagnosticActiveLanes", number(r.counts.active)},
+        {"PipelineStatisticsAvailable", number(r.counts.pipeline.available)},
+        {"HardwareInputPrimitives", number(r.counts.pipeline.inputPrimitives)},
+        {"HardwareVSInvocations", number(r.counts.pipeline.vertexInvocations)},
+        {"HardwarePSInvocations", number(r.counts.pipeline.pixelInvocations)},
+        {"HardwareRasterPrimitives", number(r.counts.pipeline.rasterPrimitives)},
         {"DiagnosticHelperFraction", number(double(r.counts.helpers) / std::max(1.0, double(r.counts.helpers) + r.counts.active))},
         {"GPU_PassMedian_ms", number(pass.median)},
         {"GPU_PassMean_ms", number(pass.mean)},
@@ -225,7 +247,8 @@ Writer::Writer(const std::filesystem::path& path, const Falcor::Device& device, 
               << "\nGPU: " << device.getInfo().adapterName << "\nAPI: " << device.getInfo().apiName
               << "\nGPU timestamp ms/tick: " << number(device.getGpuTimestampFrequency())
               << "\nTiming: indexed draw and enclosing pass; excludes query readback, diagnostics, UI and presentation."
-              << "\nScopes, settings and mesh eligibility: recorded per case. Counts are shader proxies, not hardware counters."
+              << "\nScopes, settings and mesh eligibility: recorded per case. Diagnostic counts are shader proxies."
+              << "\nOptional CLI D3D12 pipeline statistics count a separate uninstrumented draw; availability recorded per case."
               << "\nInitial status: Running\n"
               << settings << '\n';
     mMetadata.flush();

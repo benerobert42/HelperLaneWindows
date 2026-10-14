@@ -61,6 +61,8 @@ Options parse(int argc, char** argv)
             o.shapes = split(value());
         else if (a == "--methods")
             o.methods = split(value());
+        else if (a == "--capture-method")
+            o.captureMethod = value();
         else if (a == "--msaa")
         {
             o.msaa.clear();

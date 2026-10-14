@@ -19,6 +19,7 @@ struct Options
     std::string ordering = "native";
     uint32_t queueDepth = 1;
     uint32_t axisSteps = 0;
+    std::string captureMethod = "Source";
 };
 Options parse(int argc, char** argv);
 std::array<double, 3> rotationDegrees(const Options& options, uint32_t view);

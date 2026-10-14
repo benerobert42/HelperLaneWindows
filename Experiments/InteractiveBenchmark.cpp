@@ -228,6 +228,9 @@ void HelperLaneViz::processBenchmarkFrame(RenderContext* context, const ref<Fbo>
             m.failedPatches = c.volume ? mVolumeFailedPatchCount : 0;
             m.referenceError = c.volume ? mVolumeReferenceError : 0;
             m.valid = c.volume ? mVolumeResultValid : m.audit.topologyOK();
+            m.structuralValid = m.audit.topologyOK() && m.triangles == m.sourceTriangles;
+            m.referenceAuditDirections = c.volume ? 1 : 0;
+            m.surfaceEquivalent = m.valid;
         }
         if (c.volume)
         {
