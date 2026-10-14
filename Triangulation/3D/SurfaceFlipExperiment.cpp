@@ -123,7 +123,7 @@ Result optimize(
         if (sideA * sideB >= -1e-20)
             return false;
         V new0 = cross(sub(d, c), sub(b, c)), new1 = cross(sub(c, d), sub(a, d));
-        if (norm(new0) < 1e-12 || norm(new1) < 1e-12 || dot(unit(new0), normal) < constraints.minNormalDot ||
+        if (!hasStableTriangleArea(c, d, b) || !hasStableTriangleArea(d, c, a) || dot(unit(new0), normal) < constraints.minNormalDot ||
             dot(unit(new1), normal) < constraints.minNormalDot)
             return false;
         double oldLength = norm(sub(a, b)), newLength = norm(sub(c, d));

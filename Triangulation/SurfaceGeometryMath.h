@@ -29,6 +29,14 @@ inline double norm(V a)
 {
     return std::sqrt(dot(a, a));
 }
+inline bool hasStableTriangleArea(V a, V b, V c)
+{
+    const V ab = sub(b, a), ac = sub(c, a), n = cross(ab, ac);
+    const double areaSquared = dot(n, n);
+    // Do not turn float roundoff on a straight sampled edge into a triangle.
+    // The absolute threshold also agrees with the final mesh-area audit.
+    return areaSquared > 4e-24 && areaSquared > 1e-12 * dot(ab, ab) * dot(ac, ac);
+}
 inline V unit(V a)
 {
     double n = norm(a);

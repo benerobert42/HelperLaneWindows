@@ -87,6 +87,19 @@ int runRegressionChecks()
                 fanReference.sampledError(star.mesh) < 1e-6,
                 "Star replacement must improve a fan while preserving every vertex, triangle and boundary");
         auto torusSource = useSourceMeshTriangulation(BenchmarkGeometry::make("torus"));
+        Mesh sampledPanel;
+        const std::array<Falcor::float3, 3> corners{{{.123f,.432f,.234f},{.811f,.317f,.552f},{.492f,.982f,.712f}}};
+        sampledPanel.vertices.push_back(corners[0]*.321f+corners[1]*.417f+corners[2]*.262f);
+        for (uint32_t side=0; side<3; ++side)
+            for (uint32_t j=0; j<32; ++j)
+                sampledPanel.vertices.push_back(corners[side]*(1.f-j/32.f)+corners[(side+1)%3]*(j/32.f));
+        for (uint32_t j=0; j<96; ++j) sampledPanel.faces.push_back({0,j+1,(j+1)%96+1});
+        const auto panelSource=useSourceMeshTriangulation(sampledPanel);
+        const auto panelFlip=SurfaceFlipExperiment::optimize(panelSource,0);
+        require(panelSource.success && panelFlip.flips>0 &&
+                MeshValidation::audit(panelFlip.mesh,panelSource).topologyOK() &&
+                panelFlip.mesh.indices.size()==panelSource.indices.size(),
+                "Sampled straight panel edges must not create roundoff-degenerate flip triangles");
         auto splitTorus = BenchmarkGeometry::splitTorus(torusSource);
         auto torusAudit = MeshValidation::audit(torusSource, torusSource), splitAudit = MeshValidation::audit(splitTorus, torusSource);
         require(torusAudit.components == 1 && splitAudit.components == 2 && torusAudit.euler == 0 && splitAudit.euler == 0 &&

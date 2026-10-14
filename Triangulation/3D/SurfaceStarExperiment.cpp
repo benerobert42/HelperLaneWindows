@@ -109,7 +109,7 @@ Result optimize(const Triangulation3D::MeshTriangulationResult& seed,
             {
                 auto x = positions[a], y = positions[b], z = positions[c];
                 V newNormal = cross(sub(y, x), sub(z, x));
-                if (norm(newNormal) < 1e-12 || dot(unit(newNormal), normal) < constraints.minNormalDot)
+                if (!hasStableTriangleArea(x, y, z) || dot(unit(newNormal), normal) < constraints.minNormalDot)
                     return std::numeric_limits<double>::infinity();
                 // New interior edges may not already belong to triangles outside this disk.
                 for (auto e : {edge(a, b), edge(b, c), edge(c, a)})
