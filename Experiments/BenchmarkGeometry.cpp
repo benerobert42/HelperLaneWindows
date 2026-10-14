@@ -3,11 +3,85 @@
 #include "Import/ModelPresets.h"
 #include "Import/ObjMeshLoader.h"
 #include <cmath>
+#include <algorithm>
+#include <array>
 #include <stdexcept>
+#include <map>
+#include <tuple>
 
 namespace BenchmarkGeometry
 {
 using Falcor::float3;
+
+Triangulation3D::MeshTriangulationResult rewriteGrid(const Triangulation3D::Mesh& input,
+    const Triangulation3D::MeshTriangulationResult& source, bool align)
+{
+    if ((source.vertices.size() != 128 * 64 && source.vertices.size() != 192 * 97) ||
+        source.indices.size() != input.faces.size() * 6)
+        throw std::runtime_error("Grid rewiring is restricted to benchmark torus/cylinder fixtures.");
+    if (align)
+    {
+        auto aligned = make(source.vertices.size() == 128 * 64 ? "torus" : "cylinder");
+        std::map<std::tuple<float, float, float>, uint32_t> lookup;
+        for (uint32_t i = 0; i < source.vertices.size(); ++i)
+        {
+            auto p = source.vertices[i]; lookup.emplace(std::make_tuple(p.x, p.y, p.z), i);
+        }
+        for (auto& face : aligned.faces)
+            for (auto& v : face)
+            {
+                auto p = aligned.vertices[v]; v = lookup.at(std::make_tuple(p.x, p.y, p.z));
+            }
+        aligned.vertices = source.vertices;
+        return Triangulation3D::useSourceMeshTriangulation(aligned);
+    }
+    auto result = source;
+    for (size_t i = 0; i < input.faces.size(); ++i)
+    {
+        const auto& f = input.faces[i];
+        if (f.size() != 4) throw std::runtime_error("Grid cells must be quads.");
+        bool diagonal02 = false;
+        for (int t = 0; t < 2; ++t)
+            for (int j = 0; j < 3; ++j)
+            {
+                auto a = source.indices[i * 6 + t * 3 + j], b = source.indices[i * 6 + t * 3 + (j + 1) % 3];
+                diagonal02 |= (a == f[0] && b == f[2]) || (a == f[2] && b == f[0]);
+            }
+        const std::array<uint32_t, 6> replacement = diagonal02 ?
+            std::array<uint32_t, 6>{f[0], f[1], f[3], f[1], f[2], f[3]} :
+            std::array<uint32_t, 6>{f[0], f[1], f[2], f[0], f[2], f[3]};
+        std::copy(replacement.begin(), replacement.end(), result.indices.begin() + i * 6);
+    }
+    return result;
+}
+
+Triangulation3D::MeshTriangulationResult splitTorus(const Triangulation3D::MeshTriangulationResult& source)
+{
+    constexpr uint32_t columns = 128, rows = 64;
+    if (source.vertices.size() != columns * rows || source.indices.size() != columns * rows * 6)
+        throw std::runtime_error("TopologySplit is restricted to the benchmark's torus grid.");
+    auto result = source;
+    // Cut the two row seams and close each half on itself. No vertices/faces
+    // added or removed: one torus becomes two tori (same total Euler value).
+    // Closing chords change the surface, deliberately; this is not a remesh.
+    for (size_t t = 0; t < source.indices.size(); t += 3)
+    {
+        bool lowerSeam = false, upperSeam = false;
+        for (int j = 0; j < 3; ++j)
+        {
+            uint32_t row = source.indices[t + j] / columns;
+            lowerSeam |= row == rows / 2 - 1;
+            upperSeam |= row == rows - 1;
+        }
+        for (int j = 0; j < 3; ++j)
+        {
+            uint32_t v = source.indices[t + j], row = v / columns;
+            if (lowerSeam && row == rows / 2) result.indices[t + j] = v % columns;
+            if (upperSeam && row == 0) result.indices[t + j] = rows / 2 * columns + v;
+        }
+    }
+    return result;
+}
 
 Triangulation3D::Mesh make(const std::string& name)
 {

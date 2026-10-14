@@ -45,7 +45,8 @@ Result optimize(
     const Triangulation3D::MeshTriangulationResult& source,
     const ReferenceSurface& reference,
     double planePenalty,
-    const std::function<double(uint32_t, uint32_t)>& edgeCost
+    const std::function<double(uint32_t, uint32_t)>& edgeCost,
+    Constraints constraints
 )
 {
     Result result;
@@ -60,7 +61,7 @@ Result optimize(
         lo = V(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
         hi = V(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
     }
-    const double errorLimit = norm(sub(hi, lo)) * 0.001; // 0.1% of fixed source bounds diagonal
+    const double errorLimit = norm(sub(hi, lo)) * constraints.relativeError;
     std::unordered_map<uint64_t, Adjacency> adjacency;
     adjacency.reserve(indices.size() * 2);
     auto updateTriangle = [&](int t, bool insert)
@@ -115,14 +116,15 @@ Result optimize(
             return false;
         V a = vertices[f.a], b = vertices[f.b], c = vertices[f.c], d = vertices[f.d];
         V n0 = cross(sub(b, a), sub(c, a)), n1 = cross(sub(a, b), sub(d, b));
-        if (norm(n0) < 1e-12 || norm(n1) < 1e-12 || dot(unit(n0), unit(n1)) < 0.8660254)
+        if (norm(n0) < 1e-12 || norm(n1) < 1e-12 || dot(unit(n0), unit(n1)) < constraints.minNormalDot)
             return false; // protect >30 degree crease
         V normal = unit(add(n0, n1));
         double sideA = dot(cross(sub(d, c), sub(a, c)), normal), sideB = dot(cross(sub(d, c), sub(b, c)), normal);
         if (sideA * sideB >= -1e-20)
             return false;
         V new0 = cross(sub(d, c), sub(b, c)), new1 = cross(sub(c, d), sub(a, d));
-        if (norm(new0) < 1e-12 || norm(new1) < 1e-12 || dot(unit(new0), normal) < 0.8660254 || dot(unit(new1), normal) < 0.8660254)
+        if (norm(new0) < 1e-12 || norm(new1) < 1e-12 || dot(unit(new0), normal) < constraints.minNormalDot ||
+            dot(unit(new1), normal) < constraints.minNormalDot)
             return false;
         double oldLength = norm(sub(a, b)), newLength = norm(sub(c, d));
         V center = scale(add(add(a, b), add(c, d)), 0.25);

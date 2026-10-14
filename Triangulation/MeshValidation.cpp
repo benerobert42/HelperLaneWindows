@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <numeric>
 namespace MeshValidation
 {
 using namespace Falcor;
@@ -68,8 +69,20 @@ Audit audit(const MeshResult& m, const MeshResult& source)
             ++a.degenerate;
     }
     a.used = uint32_t(used.size());
+    a.edges = uint32_t(edges.size());
+    a.euler = int64_t(a.used) - a.edges + int64_t(m.indices.size() / 3);
+    std::vector<uint32_t> degree(m.vertices.size());
+    std::vector<uint32_t> parent(m.vertices.size());
+    std::iota(parent.begin(), parent.end(), 0);
+    auto root = [&](uint32_t v)
+    {
+        while (parent[v] != v) { parent[v] = parent[parent[v]]; v = parent[v]; }
+        return v;
+    };
     for (auto& [e, n] : edges)
     {
+        parent[root(e.second)] = root(e.first);
+        ++degree[e.first]; ++degree[e.second];
         if (n.first > 2)
             ++a.nonmanifold;
         if (n.first == 2 && n.second != 0)
@@ -78,6 +91,16 @@ Audit audit(const MeshResult& m, const MeshResult& source)
             ++a.unexpectedBoundary;
         a.edgeLength += length(m.vertices[e.first] - m.vertices[e.second]);
     }
+    std::set<uint32_t> components;
+    for (auto v : used) components.insert(root(v));
+    a.components = uint32_t(components.size());
+    const double meanDegree = a.used ? 2.0 * a.edges / a.used : 0;
+    for (auto v : used)
+    {
+        a.maxValence = std::max(a.maxValence, degree[v]);
+        a.valenceVariance += (degree[v] - meanDegree) * (degree[v] - meanDegree);
+    }
+    if (a.used) a.valenceVariance /= a.used;
     for (auto& [e, n] : original)
         if (n.first == 1 && !edges.count(e))
             ++a.missingBoundary;

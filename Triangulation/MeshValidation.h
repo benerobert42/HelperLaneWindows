@@ -6,6 +6,10 @@ struct Audit
 {
     uint32_t duplicates = 0, nonmanifold = 0, winding = 0, missingBoundary = 0, unexpectedBoundary = 0, degenerate = 0, used = 0;
     double edgeLength = 0, area = 0;
+    uint32_t edges = 0, components = 0;
+    int64_t euler = 0;
+    uint32_t maxValence = 0;
+    double valenceVariance = 0;
     bool topologyOK() const { return !(duplicates || nonmanifold || winding || missingBoundary || unexpectedBoundary || degenerate); }
 };
 Audit audit(const Triangulation3D::MeshTriangulationResult&, const Triangulation3D::MeshTriangulationResult&);

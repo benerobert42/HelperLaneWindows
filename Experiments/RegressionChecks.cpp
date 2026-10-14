@@ -6,6 +6,7 @@
 #include "Experiments/RasterMetrics.h"
 #include "Experiments/BenchmarkOptions.h"
 #include "Triangulation/3D/SurfaceFlipExperiment.h"
+#include "Triangulation/3D/SurfaceStarExperiment.h"
 #include "Triangulation/GeometryMath.h"
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,39 @@ int runRegressionChecks()
             "Projected edge cost can reverse a world-length flip while retaining topology"
         );
         require(quadReference.sampledError(custom.mesh) < 1e-6, "Alternative cost retains the fixed reference surface guard");
+        Mesh fan;
+        fan.vertices.push_back({0.3f, 0.03f, 0});
+        for (uint32_t i = 0; i < 8; ++i)
+        {
+            double angle = 6.28318530718 * i / 8;
+            fan.vertices.emplace_back(float(5 * std::cos(angle)), float(.3 * std::sin(angle)), 0);
+        }
+        for (uint32_t i = 0; i < 8; ++i) fan.faces.push_back({0, i + 1, (i + 1) % 8 + 1});
+        auto fanSource = useSourceMeshTriangulation(fan);
+        SurfaceFlipExperiment::ReferenceSurface fanReference(fanSource);
+        auto star = SurfaceStarExperiment::optimize(fanSource, fanReference);
+        auto fanAudit = MeshValidation::audit(fanSource, fanSource), starAudit = MeshValidation::audit(star.mesh, fanSource);
+        require(star.replacements > 0 && star.mesh.indices.size() == fanSource.indices.size() &&
+                star.mesh.vertices.size() == fanSource.vertices.size() && starAudit.used == fanAudit.used &&
+                starAudit.topologyOK() && starAudit.edgeLength < fanAudit.edgeLength &&
+                fanReference.sampledError(star.mesh) < 1e-6,
+                "Star replacement must improve a fan while preserving every vertex, triangle and boundary");
+        auto torusSource = useSourceMeshTriangulation(BenchmarkGeometry::make("torus"));
+        auto splitTorus = BenchmarkGeometry::splitTorus(torusSource);
+        auto torusAudit = MeshValidation::audit(torusSource, torusSource), splitAudit = MeshValidation::audit(splitTorus, torusSource);
+        require(torusAudit.components == 1 && splitAudit.components == 2 && torusAudit.euler == 0 && splitAudit.euler == 0 &&
+                splitAudit.topologyOK() && splitAudit.used == torusAudit.used && splitTorus.indices.size() == torusSource.indices.size(),
+                "Seam surgery must produce two closed components with unchanged counts and Euler characteristic");
+        auto skewGrid = BenchmarkGeometry::make("torus_skew");
+        auto skewSource = useSourceMeshTriangulation(skewGrid);
+        for (bool align : {false, true})
+        {
+            auto rewired = BenchmarkGeometry::rewriteGrid(skewGrid, skewSource, align);
+            auto rewiredAudit = MeshValidation::audit(rewired, skewSource);
+            require(rewiredAudit.topologyOK() && rewiredAudit.components == 1 && rewiredAudit.euler == 0 &&
+                    rewiredAudit.used == skewSource.vertices.size() && rewired.indices.size() == skewSource.indices.size(),
+                    "Global grid rewiring preserves used vertices, faces and surface topology");
+        }
         Mesh concave;
         for (auto p : std::vector<Falcor::float2>{{0, 0}, {3, 0}, {3, 3}, {2, 3}, {2, 1}, {1, 1}, {1, 3}, {0, 3}})
             concave.vertices.emplace_back(p.x, p.y, 0);
