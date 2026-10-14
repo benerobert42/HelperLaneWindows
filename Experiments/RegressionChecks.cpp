@@ -182,7 +182,9 @@ int runRegressionChecks()
             std::cout << name << ": " << source.indices.size() / 3 << " triangles, " << flipped.flips << " flips, patch status "
                       << int(output.status) << "\n";
         }
-        for (const auto& model : {std::array<uint32_t, 3>{8, 7958, 15744}, {9, 2503, 4968}, {10, 1292, 2464}})
+        for (const auto& model : {std::array<uint32_t, 3>{8, 7958, 15744}, {9, 2503, 4968}, {10, 1292, 2464},
+                                 {11, 1538, 3072}, {12, 3072, 6144}, {13, 2114, 4224},
+                                 {14, 24576, 49152}, {15, 7913, 15360}})
         {
             const auto loaded = ObjMeshLoader::load(getModelPresetPath(model[0]).string());
             require(loaded.success && loaded.mesh.vertices.size() == model[1], "Preset must load through the OBJ pipeline");

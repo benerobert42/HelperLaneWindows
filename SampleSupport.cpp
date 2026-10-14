@@ -1,4 +1,5 @@
 #include "SampleSupport.h"
+#include "Import/ModelPresets.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -39,6 +40,7 @@ std::string getVolumeTriangulationMethodName(uint32_t type)
 
 std::string getVolumeGeometryName(uint32_t type)
 {
+    if (type >= 8 && type - 8 < kObjModelPresets.size()) return kObjModelPresets[type - 8].name;
     switch (type)
     {
     case 1:
@@ -55,12 +57,6 @@ std::string getVolumeGeometryName(uint32_t type)
         return "Clustered Wave Patch";
     case 7:
         return "OBJ File";
-    case 8:
-        return "Suzanne";
-    case 9:
-        return "Bunny";
-    case 10:
-        return "Teapot";
     case 0:
     default:
         return "Sphere";
@@ -69,7 +65,7 @@ std::string getVolumeGeometryName(uint32_t type)
 
 bool isObjVolumeGeometry(uint32_t type)
 {
-    return type >= 7 && type <= 10;
+    return type >= 7 && type < 8 + kObjModelPresets.size();
 }
 
 bool isOpenPatchVolumeGeometry(uint32_t type)

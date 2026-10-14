@@ -327,7 +327,8 @@ void HelperLaneViz::generateVolumeGeometry()
         mVolumeObjStatus.clear();
         mVolumeObjPolygonFaceCount = 0;
 
-        switch (mVolumeGeometryType)
+        // Every OBJ preset shares the custom-OBJ importer (geometry type 7).
+        switch (isObjVolumeGeometry(mVolumeGeometryType) ? 7u : mVolumeGeometryType)
         {
         case 1:
             sourceMesh = ProceduralGeometry3D::makeEllipsoid(
@@ -382,9 +383,6 @@ void HelperLaneViz::generateVolumeGeometry()
                 float3(0.0f, 0.0f, 0.0f)
             );
             break;
-        case 8:
-        case 9:
-        case 10:
         case 7:
         {
             ObjMeshLoader::LoadOptions loadOptions;
@@ -805,10 +803,12 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
 
     if (volumetric)
     {
-        bool changed = w.dropdown("Volume Geometry", {
+        Gui::DropdownList geometries{
             {0, "Sphere"}, {1, "Anisotropic Ellipsoid"}, {2, "Jittered Sphere"}, {3, "Lumpy Ellipsoid"},
-            {4, "Saddle Stress Patch"}, {5, "Folded Sheet"}, {6, "Clustered Wave Patch"}, {7, "OBJ File"},
-            {8, "Suzanne (OBJ)"}, {9, "Bunny (OBJ)"}, {10, "Teapot (OBJ)"}}, mVolumeGeometryType);
+            {4, "Saddle Stress Patch"}, {5, "Folded Sheet"}, {6, "Clustered Wave Patch"}, {7, "OBJ File"}};
+        for (uint32_t i = 0; i < kObjModelPresets.size(); ++i)
+            geometries.push_back({8 + i, std::string(kObjModelPresets[i].name) + " (OBJ)"});
+        bool changed = w.dropdown("Volume Geometry", geometries, mVolumeGeometryType);
         if (changed)
         {
             if (isObjVolumeGeometry(mVolumeGeometryType)) mVolumeTriangulationType = 3;
