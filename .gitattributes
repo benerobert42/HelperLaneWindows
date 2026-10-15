@@ -1,0 +1,6 @@
+# Preserve measured asset/provenance bytes regardless of a user's autocrlf setting.
+# -text disables line-ending conversion without disabling readable text diffs.
+Data/Models/** -text
+analysis/gpu/** -text
+docs/confirmed_measurements.csv -text
+docs/falcor-gpu-timer.patch -text

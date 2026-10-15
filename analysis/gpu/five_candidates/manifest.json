@@ -1,0 +1,28 @@
+{
+  "FinalSampleGitCommit": "2a3cb66b58119a3e0f432a68fffd2ecc2a9cc622",
+  "MeasuredSampleGitCommit": "6d3a9225bee88fed37c08daf685c973212a30a3e",
+  "Provenance": "All measurement binaries are identified by run metadata. Final GUI preset registration is separate from the measured algorithm revision.",
+  "Files": {
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\FacetedArch.obj": "4ead602d01215aa990b3a91048224cfd8480c954ba209989e6b74fca8e86a43d",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\FacetedArch_control.obj": "32b6b50568ba00d16a2e458b76516556819c82d8c02db38dfb620590224aceac",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\SpiralRamp.obj": "4455d468f7c4a5e0adbc4a85675826e9de68fb8f161c075fc320b758063ad582",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\SpiralRamp_control.obj": "117a6b8fcd774b18b5cd526e17373d932b9765277a92cbda393ca84264b9ecfc",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\SweptWing.obj": "0d0aa54add4b27c354fecb963351087e22acd9f33bd8512222295a88db3cd1e3",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\SweptWing_control.obj": "608267a45a7512a11fe92e3cb5ce4f351b8c41984485779f4c12a2ac7cb6f7d3",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\ToothedWheel.obj": "68a894a504dc25be26f6da0b4b331eabb9c9f4f9a2dde4e63c4a9fd72c0262a7",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\ToothedWheel_control.obj": "ee2f6b4f3f696d5fa3b8031ff3b1327fc172d4542cf3c030052b61c145478db9",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\TrefoilKnot.obj": "186eee02bc17f21f1f143e5d0dd8ccfb35b1c865e39d356cfb89380e0f85be64",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\Data\\Models\\ResearchCandidates\\TrefoilKnot_control.obj": "8cedec758012c8995dbad376c85494801ae84a03627e97c6779ef9e3693546c8",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\analyze.py": "213e0d8e9d5f68df3e228f56c6727e56ca9ca584a35fd57291b8734c55eee0f5",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\generate.py": "0d1892526e306142f9e8ec98c654e98c845837774ad9cd18a8626e99f7394138",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\plot.py": "07e9f8620b05b4cf3e3bb671d5159ba8c7a5c5ca0ab7f3f5681cc3afd4bfb22f",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\capture.ps1": "a4c3c9586177f738f3de6e4b245f626c8358dfc4902d20e673a9046f6b52153f",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\run.ps1": "f87f2acd90d237194823e8369cafee78c76314a43452dbe514ad2df8d0f3b379",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\render_figures.cjs": "d40687d232e6363bc0dcd52d990a10684a636edaa62ca46c73b1cff247da66a0",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\measured_source\\binary_hashes.json": "fd8dc5180eb2c1d14ba4e1830b465d9c6a24a062020a1fa33b012033a1f3055c",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\measured_source\\CMakeLists.txt": "8ee4d9a8024a712f5d2a4cd05ef374a7dee82391df1bbc0b3f7b7654259cd130",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\measured_source\\FalcorGpuTimer.cpp": "f2a66a5fe84bb8d6b14d86ff0bf2377e4f85238b2eef8f1cabc6cbdad071fd01",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\measured_source\\FalcorGpuTimer.h": "4b2c60ca7ad83168b6035a0231319395cb42443a8e6d2f3eb32f3be3ddb24500",
+    "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\HelperLaneWindows\\analysis\\gpu\\five_candidates\\measured_source\\sample_revision.txt": "3a1c529721b4ecaef85b89fdb552f939c202486281550b34730a72d11756e0e1"
+  }
+}

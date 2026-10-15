@@ -1,4 +1,5 @@
 #include "HelperLaneViz.h"
+#include "Import/ModelPresets.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <cmath>
@@ -65,14 +66,12 @@ int runScreenshot(int argc, char** argv)
             throw std::runtime_error("MSAA must be 1, 2, 4, or 8");
         app.mGeometryDimensionality = HelperLaneViz::GeometryDimensionality::Volumetric;
         const std::string model = recipe.value("model", "Suzanne");
-        if (model == "Suzanne") app.mVolumeGeometryType = 8;
-        else if (model == "Bunny") app.mVolumeGeometryType = 9;
-        else if (model == "Teapot") app.mVolumeGeometryType = 10;
-        else
-        {
-            app.mVolumeGeometryType = 7;
-            app.mVolumeObjPath = (std::filesystem::path(argv[2]).parent_path() / model).string();
-        }
+        app.mVolumeGeometryType = 7;
+        app.mVolumeObjPath = (std::filesystem::path(argv[2]).parent_path() / model).string();
+        for (uint32_t i = 0; i < kObjModelPresets.size(); ++i)
+            if (model == kObjModelPresets[i].name) app.mVolumeGeometryType = 8 + i;
+        for (uint32_t i = 0; i < kStudyGeometryPresets.size(); ++i)
+            if (model == std::string("Study: ") + kStudyGeometryPresets[i].name) app.mVolumeGeometryType = kStudyGeometryFirst + i;
         app.mVolumeTriangulationType = recipe.value("method", 3u);
         if (app.mVolumeTriangulationType > 5) throw std::runtime_error("Method must be 0..5 (3 = Source Faces)");
         const std::map<std::string, HelperLaneViz::VizMode> modes{

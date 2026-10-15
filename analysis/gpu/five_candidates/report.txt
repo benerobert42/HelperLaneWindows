@@ -1,0 +1,179 @@
+Five new 3D connectivity candidates
+
+1920x1080, reviewed raster lit shader, 24 separate-axis conditions (22 unique static poses), 1x/4x MSAA.
+Screen/confirm/control: 64 instances. Large: one object, a separate projected-footprint workload with fixed counts within every method comparison.
+Screen: 2 randomized blocks, 64 warmups, 32 raw samples. Confirmation and controls: 3 blocks, 256 warmups, 128 samples.
+All methods keep source vertex positions/storage/order, used vertices and triangle count. Uniform meshoptimizer cache/overdraw policy.
+Strict comparisons require structural validity and <=0.1% source bounds diagonal sampled error in BOTH directions.
+Not a continuous Hausdorff, analytic-surface-error or self-intersection guarantee. Surface-changing and structurally invalid results are excluded.
+Per-pose SourceControl gate: <=2% mean and <=3% worst-block draw drift. At least 12 eligible conditions; 3% practical gain threshold.
+No raw timing samples removed. Draw excludes clear/resolve/UI/present; pass includes clear/draw/resolve, not the entire application frame.
+Laptop clocks are unlocked and recorded. SourceControl gates mitigate temporal drift, but do not isolate workload-dependent DVFS.
+Counter queries and diagnostic helper shader run separately after timing. Helpers are a proxy, not a direct count of wasted lit-shader ALU.
+Lowest observed candidate mean is reported; small differences do not establish superiority between algorithms.
+
+Models and intentionally introduced source defects
+SweptWing: 1538 vertices, 3072 triangles. Closed thin tapered/swept/twisted wing, sharp facets; intentionally dense planar triangle fans; balanced planar control.
+ToothedWheel: 3072 vertices, 6144 triangles. Closed concave 12-tooth wheel with a central through-hole, sharp creases; dense planar fans; balanced planar control.
+FacetedArch: 2114 vertices, 4224 triangles. Closed U-shaped curved beam with planar front/back panels and inner/outer facets; dense planar fans; balanced planar control.
+TrefoilKnot: 24576 vertices, 49152 triangles. Smooth closed self-occluding knot tube; integer helical UV shear of two tube samples per centerline ring; unsheared control.
+SpiralRamp: 7913 vertices, 15360 triangles. Open two-turn helicoid with negative Gaussian curvature and sheared UV lattice; control only selects shorter cell diagonals.
+
+These were chosen to contain improvable connectivity; their gains do not estimate average production-asset gains.
+Panel source/control pairs preserve the exact planar surface and the same vertex list. Balanced controls use short-ear triangulation with the same interior vertex reinserted.
+Knot source/control share vertices and topology, but their piecewise-planar sampled surfaces differ. Ramp control only swaps cell diagonals; it is not a globally optimized control.
+Each control run fixes normals from its own source. Do not compare absolute source/control GPU times as a pure connectivity effect without accounting for that attribute difference.
+The numerical area-guard fix is recorded in the current source revision. Earlier 27-model results retain their own older measured-source snapshots.
+
+Confirmed best observed strict results
+model | MSAA | method | eligible/24 | draw % | enclosing pass % | world edge % | projected edge % | diagnostic helpers % | PS % | VS %
+SweptWing | 1 | HeapPlane | 23/24 | -59.84 | -56.93 | -82.19 | -82.37 | -31.53 | +13.63 | +22.00
+SweptWing | 4 | HeapPlane | 23/24 | -70.48 | -57.78 | -82.19 | -82.37 | -59.32 | -31.90 | +22.00
+ToothedWheel | 1 | HeapQuadView | 24/24 | -27.68 | -26.74 | -52.87 | -59.01 | -34.59 | -3.27 | +7.45
+ToothedWheel | 4 | HeapQuadView | 24/24 | -42.31 | -32.32 | -52.87 | -59.01 | -47.06 | -30.55 | +7.45
+FacetedArch | 1 | HeapQuadView | 24/24 | -13.82 | -12.99 | -45.47 | -59.68 | -30.70 | +0.61 | +17.87
+FacetedArch | 4 | HeapQuadView | 24/24 | -43.20 | -30.43 | -45.47 | -59.68 | -42.57 | -26.98 | +17.87
+TrefoilKnot | 1 | No confirmed >=3% gain | 0/24 | NA | NA | NA | NA | NA | NA | NA
+TrefoilKnot | 4 | HeapQuadView | 23/24 | -11.81 | -10.71 | -19.39 | -29.72 | +1.16 | -0.75 | -0.28
+SpiralRamp | 1 | No confirmed >=3% gain | 0/24 | NA | NA | NA | NA | NA | NA | NA
+SpiralRamp | 4 | Heap3D | 20/24 | -27.31 | -22.34 | -45.84 | -45.74 | -10.23 | -7.87 | +0.29
+
+Interpretation
+All five deliberately poor source triangulations admit >20% world-edge reduction with a valid static method. At 64 instances/4x, the static heap improves draw time by ~70% wing, ~41% wheel, ~40% arch, ~11% knot and ~27% ramp.
+The wing requires the plane-penalized heap: plain Heap3D is rejected by the reverse sampled-distance audit. Its ~82% edge reduction is retained by HeapPlane.
+On balanced/short-diagonal controls, static 4x gains shrink to ~4% wing, ~4% wheel, ~8% arch, <1% knot and ~4% ramp. These are comparisons against each control's own source, with its own fixed normals.
+Thus the large gains are principally repairs to deliberately inefficient connectivity. The shapes themselves do not guarantee similar gains on well-triangulated assets.
+The 64-instance knot/ramp world heaps regress at 1x (~4%/~1%). With one larger object they improve 1x draw time by ~13%/~16%. Instance count also changes primitive load and lighting directions; this is a workload sensitivity check, not an isolated causal scale experiment.
+The one-object wing has only 11/24 stable conditions at 1x and 6/24 at 4x, below the predefined 12-condition threshold. Its numerical means remain recorded but are exploratory, not accepted performance conclusions.
+Wing/arch/wheel gains accompany large bbox/boundary reductions, and substantial 4x PS invocation savings. Some 1x gains occur despite more PS/VS invocations. The exact limiting raster/scheduling unit remains unproven without vendor counters.
+
+Static method summary: plane-penalized heap for wing, world heap for the other meshes
+model | objects | MSAA | strict eligible/24 | interpretation | draw % | enclosing pass % | projected edges % | helpers % | PS % | VS %
+SweptWing | 64 | 1 | 23/24 | accepted | -59.84 | -56.93 | -82.37 | -31.53 | +13.63 | +22.00
+SweptWing | 64 | 4 | 23/24 | accepted | -70.48 | -57.78 | -82.37 | -59.32 | -31.90 | +22.00
+SweptWing | 1 | 1 | 11/24 | exploratory; insufficient stable conditions | -35.70 | -26.96 | -80.29 | -67.29 | +7.45 | +22.00
+SweptWing | 1 | 4 | 6/24 | exploratory; insufficient stable conditions | -45.91 | -16.64 | -79.65 | -76.83 | -34.43 | +22.00
+ToothedWheel | 64 | 1 | 24/24 | accepted | -27.55 | -26.61 | -55.55 | -33.66 | -1.58 | +5.76
+ToothedWheel | 64 | 4 | 24/24 | accepted | -40.68 | -31.10 | -55.55 | -45.50 | -28.80 | +5.76
+ToothedWheel | 1 | 1 | 21/24 | accepted | -21.55 | -17.12 | -54.48 | -53.11 | -0.30 | +5.76
+ToothedWheel | 1 | 4 | 13/24 | accepted | -31.61 | -13.38 | -55.57 | -55.13 | -17.95 | +5.76
+FacetedArch | 64 | 1 | 24/24 | accepted | -13.43 | -12.66 | -54.33 | -32.99 | -0.92 | +17.19
+FacetedArch | 64 | 4 | 24/24 | accepted | -39.90 | -27.71 | -54.33 | -41.61 | -26.97 | +17.19
+FacetedArch | 1 | 1 | 22/24 | accepted | -14.42 | -10.09 | -54.45 | -42.33 | +1.36 | +17.19
+FacetedArch | 1 | 4 | 21/24 | accepted | -23.44 | -6.30 | -54.58 | -44.83 | -15.14 | +17.19
+TrefoilKnot | 64 | 1 | 23/24 | accepted | +3.86 | +3.84 | -25.34 | -0.99 | -2.26 | +0.01
+TrefoilKnot | 64 | 4 | 23/24 | accepted | -10.66 | -9.68 | -25.47 | -1.62 | -2.23 | +0.01
+TrefoilKnot | 1 | 1 | 24/24 | accepted | -12.99 | -10.98 | -25.26 | -16.07 | -1.27 | -0.12
+TrefoilKnot | 1 | 4 | 21/24 | accepted | -15.16 | -7.38 | -25.44 | -19.37 | -10.86 | -0.12
+SpiralRamp | 64 | 1 | 23/24 | accepted | +1.38 | +1.34 | -45.75 | -0.64 | -0.29 | +0.29
+SpiralRamp | 64 | 4 | 20/24 | accepted | -27.31 | -22.34 | -45.74 | -10.23 | -7.87 | +0.29
+SpiralRamp | 1 | 1 | 21/24 | accepted | -15.80 | -12.33 | -45.83 | -39.10 | -0.37 | -0.09
+SpiralRamp | 1 | 4 | 16/24 | accepted | -32.52 | -14.24 | -45.87 | -40.80 | -17.97 | -0.09
+
+Every longer comparison (including balanced/short-diagonal controls)
+stage/model | method | MSAA | strict eligible/24 | draw % | pass % | error % of bounds | construction CPU ms | setup CPU ms | changed triangles | status
+confirm/FacetedArch | CDT | 1 | 24/24 | -13.22 | -12.47 | +0.00 | +11.36 | +107.95 | +3323.00 | +1.00
+confirm/FacetedArch | CDT | 4 | 24/24 | -36.29 | -25.32 | +0.00 | +11.36 | +107.95 | +3323.00 | +1.00
+confirm/FacetedArch | CDTFlip | 1 | 0/24 | NA | NA | +0.00 | +0.29 | +52.56 | +0.00 | +2.00
+confirm/FacetedArch | CDTFlip | 4 | 0/24 | NA | NA | +0.00 | +0.29 | +52.56 | +0.00 | +2.00
+confirm/FacetedArch | Heap3D | 1 | 24/24 | -13.43 | -12.66 | +0.00 | +42.20 | +135.34 | +3234.00 | +1.00
+confirm/FacetedArch | Heap3D | 4 | 24/24 | -39.90 | -27.71 | +0.00 | +42.20 | +135.34 | +3234.00 | +1.00
+confirm/FacetedArch | HeapPlane | 1 | 24/24 | -13.54 | -12.73 | +0.00 | +42.48 | +137.70 | +3234.00 | +1.00
+confirm/FacetedArch | HeapPlane | 4 | 24/24 | -39.95 | -27.84 | +0.00 | +42.48 | +137.70 | +3234.00 | +1.00
+confirm/FacetedArch | HeapQuadView | 1 | 24/24 | -13.82 | -12.99 | +0.00 | +57.96 | +158.11 | +3510.12 | +1.00
+confirm/FacetedArch | HeapQuadView | 4 | 24/24 | -43.20 | -30.43 | +0.00 | +57.96 | +158.11 | +3510.12 | +1.00
+confirm/SpiralRamp | CDT | 1 | 0/24 | NA | NA | +0.00 | +2.25 | +204.41 | +0.00 | +2.00
+confirm/SpiralRamp | CDT | 4 | 0/24 | NA | NA | +0.00 | +2.25 | +204.41 | +0.00 | +2.00
+confirm/SpiralRamp | CDTFlip | 1 | 0/24 | NA | NA | +0.00 | +2.35 | +201.62 | +0.00 | +2.00
+confirm/SpiralRamp | CDTFlip | 4 | 0/24 | NA | NA | +0.00 | +2.35 | +201.62 | +0.00 | +2.00
+confirm/SpiralRamp | Heap3D | 1 | 23/24 | +1.38 | +1.34 | +0.01 | +247.75 | +605.51 | +15360.00 | +1.00
+confirm/SpiralRamp | Heap3D | 4 | 20/24 | -27.31 | -22.34 | +0.01 | +247.75 | +605.51 | +15360.00 | +1.00
+confirm/SpiralRamp | HeapPlane | 1 | 23/24 | +1.77 | +1.72 | +0.01 | +246.84 | +611.24 | +15360.00 | +1.00
+confirm/SpiralRamp | HeapPlane | 4 | 20/24 | -27.11 | -21.95 | +0.01 | +246.84 | +611.24 | +15360.00 | +1.00
+confirm/SpiralRamp | HeapQuadView | 1 | 23/24 | +2.64 | +2.55 | +0.01 | +293.99 | +653.73 | +15360.00 | +1.00
+confirm/SpiralRamp | HeapQuadView | 4 | 20/24 | -26.45 | -21.58 | +0.01 | +293.99 | +653.73 | +15360.00 | +1.00
+confirm/SweptWing | CDT | 1 | 23/24 | -49.93 | -47.49 | +0.08 | +8.94 | +249.01 | +1929.00 | +1.00
+confirm/SweptWing | CDT | 4 | 23/24 | -51.43 | -42.28 | +0.08 | +8.94 | +249.01 | +1929.00 | +1.00
+confirm/SweptWing | CDTFlip | 1 | 0/24 | NA | NA | +0.00 | +0.26 | +162.31 | +0.00 | +2.00
+confirm/SweptWing | CDTFlip | 4 | 0/24 | NA | NA | +0.00 | +0.26 | +162.31 | +0.00 | +2.00
+confirm/SweptWing | Heap3D | 1 | 0/24 | NA | NA | +0.10 | +150.15 | +320.19 | +2896.00 | +1.00
+confirm/SweptWing | Heap3D | 4 | 0/24 | NA | NA | +0.10 | +150.15 | +320.19 | +2896.00 | +1.00
+confirm/SweptWing | HeapPlane | 1 | 23/24 | -59.84 | -56.93 | +0.08 | +148.66 | +320.37 | +2896.00 | +1.00
+confirm/SweptWing | HeapPlane | 4 | 23/24 | -70.48 | -57.78 | +0.08 | +148.66 | +320.37 | +2896.00 | +1.00
+confirm/SweptWing | HeapQuadView | 1 | 13/24 | -58.59 | -55.53 | +0.11 | +165.71 | +343.51 | +2913.88 | +1.00
+confirm/SweptWing | HeapQuadView | 4 | 13/24 | -68.22 | -55.23 | +0.11 | +165.71 | +343.51 | +2913.88 | +1.00
+confirm/ToothedWheel | CDT | 1 | 24/24 | -26.72 | -25.80 | +0.00 | +15.31 | +195.48 | +4956.00 | +1.00
+confirm/ToothedWheel | CDT | 4 | 24/24 | -34.58 | -26.36 | +0.00 | +15.31 | +195.48 | +4956.00 | +1.00
+confirm/ToothedWheel | CDTFlip | 1 | 0/24 | NA | NA | +0.00 | +0.31 | +102.67 | +0.00 | +2.00
+confirm/ToothedWheel | CDTFlip | 4 | 0/24 | NA | NA | +0.00 | +0.31 | +102.67 | +0.00 | +2.00
+confirm/ToothedWheel | Heap3D | 1 | 24/24 | -27.55 | -26.61 | +0.05 | +89.61 | +248.53 | +5352.00 | +1.00
+confirm/ToothedWheel | Heap3D | 4 | 24/24 | -40.68 | -31.10 | +0.05 | +89.61 | +248.53 | +5352.00 | +1.00
+confirm/ToothedWheel | HeapPlane | 1 | 24/24 | -27.29 | -26.36 | +0.05 | +89.14 | +248.46 | +5352.00 | +1.00
+confirm/ToothedWheel | HeapPlane | 4 | 24/24 | -40.75 | -31.20 | +0.05 | +89.14 | +248.46 | +5352.00 | +1.00
+confirm/ToothedWheel | HeapQuadView | 1 | 24/24 | -27.68 | -26.74 | +0.10 | +103.47 | +269.21 | +5269.67 | +1.00
+confirm/ToothedWheel | HeapQuadView | 4 | 24/24 | -42.31 | -32.32 | +0.10 | +103.47 | +269.21 | +5269.67 | +1.00
+confirm/TrefoilKnot | CDT | 1 | 23/24 | +0.01 | -0.00 | +0.00 | +312.86 | +1777.71 | +0.00 | +1.00
+confirm/TrefoilKnot | CDT | 4 | 23/24 | -0.19 | -0.19 | +0.00 | +312.86 | +1777.71 | +0.00 | +1.00
+confirm/TrefoilKnot | CDTFlip | 1 | 23/24 | +0.09 | +0.09 | +0.00 | +321.95 | +1746.96 | +0.00 | +1.00
+confirm/TrefoilKnot | CDTFlip | 4 | 23/24 | -0.11 | -0.14 | +0.00 | +321.95 | +1746.96 | +0.00 | +1.00
+confirm/TrefoilKnot | Heap3D | 1 | 23/24 | +3.86 | +3.84 | +0.05 | +1010.31 | +2308.68 | +46788.00 | +1.00
+confirm/TrefoilKnot | Heap3D | 4 | 23/24 | -10.66 | -9.68 | +0.05 | +1010.31 | +2308.68 | +46788.00 | +1.00
+confirm/TrefoilKnot | HeapPlane | 1 | 23/24 | +3.87 | +3.83 | +0.05 | +1015.26 | +2350.15 | +46788.00 | +1.00
+confirm/TrefoilKnot | HeapPlane | 4 | 23/24 | -10.71 | -9.75 | +0.05 | +1015.26 | +2350.15 | +46788.00 | +1.00
+confirm/TrefoilKnot | HeapQuadView | 1 | 23/24 | +7.25 | +7.17 | +0.07 | +1202.42 | +2569.89 | +44009.67 | +1.00
+confirm/TrefoilKnot | HeapQuadView | 4 | 23/24 | -11.81 | -10.71 | +0.07 | +1202.42 | +2569.89 | +44009.67 | +1.00
+control/FacetedArch_control | Heap3D | 1 | 21/24 | -0.27 | -0.25 | +0.00 | +18.19 | +122.96 | +1664.00 | +1.00
+control/FacetedArch_control | Heap3D | 4 | 20/24 | -8.37 | -5.51 | +0.00 | +18.19 | +122.96 | +1664.00 | +1.00
+control/FacetedArch_control | HeapPlane | 1 | 21/24 | +0.12 | +0.11 | +0.00 | +18.15 | +126.44 | +1664.00 | +1.00
+control/FacetedArch_control | HeapPlane | 4 | 20/24 | -8.48 | -5.58 | +0.00 | +18.15 | +126.44 | +1664.00 | +1.00
+control/SpiralRamp_control | Heap3D | 1 | 22/24 | +0.59 | +0.58 | +0.01 | +114.66 | +442.74 | +15299.00 | +1.00
+control/SpiralRamp_control | Heap3D | 4 | 16/24 | -3.98 | -2.96 | +0.01 | +114.66 | +442.74 | +15299.00 | +1.00
+control/SpiralRamp_control | HeapPlane | 1 | 22/24 | +0.52 | +0.51 | +0.01 | +111.99 | +437.59 | +15299.00 | +1.00
+control/SpiralRamp_control | HeapPlane | 4 | 16/24 | -4.01 | -3.00 | +0.01 | +111.99 | +437.59 | +15299.00 | +1.00
+control/SweptWing_control | Heap3D | 1 | 0/24 | NA | NA | +0.10 | +14.51 | +108.85 | +596.00 | +1.00
+control/SweptWing_control | Heap3D | 4 | 0/24 | NA | NA | +0.10 | +14.51 | +108.85 | +596.00 | +1.00
+control/SweptWing_control | HeapPlane | 1 | 24/24 | -1.49 | -1.33 | +0.08 | +13.60 | +108.08 | +555.00 | +1.00
+control/SweptWing_control | HeapPlane | 4 | 24/24 | -3.93 | -2.05 | +0.08 | +13.60 | +108.08 | +555.00 | +1.00
+control/ToothedWheel_control | Heap3D | 1 | 22/24 | +0.87 | +0.84 | +0.05 | +19.08 | +156.50 | +2168.00 | +1.00
+control/ToothedWheel_control | Heap3D | 4 | 22/24 | -4.18 | -2.77 | +0.05 | +19.08 | +156.50 | +2168.00 | +1.00
+control/ToothedWheel_control | HeapPlane | 1 | 22/24 | +1.03 | +0.98 | +0.05 | +18.99 | +156.97 | +2168.00 | +1.00
+control/ToothedWheel_control | HeapPlane | 4 | 22/24 | -4.06 | -2.70 | +0.05 | +18.99 | +156.97 | +2168.00 | +1.00
+control/TrefoilKnot_control | Heap3D | 1 | 24/24 | -0.01 | +0.00 | +0.01 | +261.66 | +1444.56 | +32256.00 | +1.00
+control/TrefoilKnot_control | Heap3D | 4 | 22/24 | -0.88 | -0.75 | +0.01 | +261.66 | +1444.56 | +32256.00 | +1.00
+control/TrefoilKnot_control | HeapPlane | 1 | 24/24 | +0.03 | +0.05 | +0.01 | +246.96 | +1428.49 | +32256.00 | +1.00
+control/TrefoilKnot_control | HeapPlane | 4 | 22/24 | -0.29 | -0.38 | +0.01 | +246.96 | +1428.49 | +32256.00 | +1.00
+large/FacetedArch | CDT | 1 | 22/24 | -14.39 | -10.03 | +0.00 | +11.24 | +107.67 | +3323.00 | +1.00
+large/FacetedArch | CDT | 4 | 21/24 | -22.15 | -5.61 | +0.00 | +11.24 | +107.67 | +3323.00 | +1.00
+large/FacetedArch | Heap3D | 1 | 22/24 | -14.42 | -10.09 | +0.00 | +43.28 | +136.99 | +3234.00 | +1.00
+large/FacetedArch | Heap3D | 4 | 21/24 | -23.44 | -6.30 | +0.00 | +43.28 | +136.99 | +3234.00 | +1.00
+large/FacetedArch | HeapPlane | 1 | 22/24 | -14.22 | -9.97 | +0.00 | +41.66 | +134.93 | +3234.00 | +1.00
+large/FacetedArch | HeapPlane | 4 | 21/24 | -23.43 | -6.31 | +0.00 | +41.66 | +134.93 | +3234.00 | +1.00
+large/SpiralRamp | CDT | 1 | 0/24 | NA | NA | +0.00 | +2.24 | +206.58 | +0.00 | +2.00
+large/SpiralRamp | CDT | 4 | 0/24 | NA | NA | +0.00 | +2.24 | +206.58 | +0.00 | +2.00
+large/SpiralRamp | Heap3D | 1 | 21/24 | -15.80 | -12.33 | +0.01 | +240.95 | +595.48 | +15360.00 | +1.00
+large/SpiralRamp | Heap3D | 4 | 16/24 | -32.52 | -14.24 | +0.01 | +240.95 | +595.48 | +15360.00 | +1.00
+large/SpiralRamp | HeapPlane | 1 | 21/24 | -15.06 | -11.82 | +0.01 | +252.55 | +635.15 | +15360.00 | +1.00
+large/SpiralRamp | HeapPlane | 4 | 16/24 | -32.03 | -14.10 | +0.01 | +252.55 | +635.15 | +15360.00 | +1.00
+large/SweptWing | CDT | 1 | 11/24 | -26.20 | -19.75 | +0.08 | +8.67 | +250.26 | +1929.00 | +1.00
+large/SweptWing | CDT | 4 | 6/24 | -34.32 | -12.00 | +0.08 | +8.67 | +250.26 | +1929.00 | +1.00
+large/SweptWing | Heap3D | 1 | 0/24 | NA | NA | +0.10 | +148.15 | +327.24 | +2896.00 | +1.00
+large/SweptWing | Heap3D | 4 | 0/24 | NA | NA | +0.10 | +148.15 | +327.24 | +2896.00 | +1.00
+large/SweptWing | HeapPlane | 1 | 11/24 | -35.70 | -26.96 | +0.08 | +154.89 | +329.82 | +2896.00 | +1.00
+large/SweptWing | HeapPlane | 4 | 6/24 | -45.91 | -16.64 | +0.08 | +154.89 | +329.82 | +2896.00 | +1.00
+large/ToothedWheel | CDT | 1 | 21/24 | -19.05 | -15.11 | +0.00 | +15.47 | +194.91 | +4956.00 | +1.00
+large/ToothedWheel | CDT | 4 | 13/24 | -28.07 | -11.84 | +0.00 | +15.47 | +194.91 | +4956.00 | +1.00
+large/ToothedWheel | Heap3D | 1 | 21/24 | -21.55 | -17.12 | +0.05 | +89.35 | +248.86 | +5352.00 | +1.00
+large/ToothedWheel | Heap3D | 4 | 13/24 | -31.61 | -13.38 | +0.05 | +89.35 | +248.86 | +5352.00 | +1.00
+large/ToothedWheel | HeapPlane | 1 | 21/24 | -21.32 | -16.90 | +0.05 | +88.29 | +247.38 | +5352.00 | +1.00
+large/ToothedWheel | HeapPlane | 4 | 13/24 | -31.71 | -13.48 | +0.05 | +88.29 | +247.38 | +5352.00 | +1.00
+large/TrefoilKnot | CDT | 1 | 24/24 | -0.05 | -0.05 | +0.00 | +310.32 | +1777.57 | +0.00 | +1.00
+large/TrefoilKnot | CDT | 4 | 21/24 | -0.26 | +0.51 | +0.00 | +310.32 | +1777.57 | +0.00 | +1.00
+large/TrefoilKnot | Heap3D | 1 | 24/24 | -12.99 | -10.98 | +0.05 | +1009.48 | +2318.05 | +46788.00 | +1.00
+large/TrefoilKnot | Heap3D | 4 | 21/24 | -15.16 | -7.38 | +0.05 | +1009.48 | +2318.05 | +46788.00 | +1.00
+large/TrefoilKnot | HeapPlane | 1 | 24/24 | -12.94 | -10.95 | +0.05 | +1005.94 | +2299.98 | +46788.00 | +1.00
+large/TrefoilKnot | HeapPlane | 4 | 21/24 | -15.07 | -6.24 | +0.05 | +1005.94 | +2299.98 | +46788.00 | +1.00
+
+Native counts measure submitted/processed work, not hardware stage stalls or occupancy. The limiting stage is not identified by correlation alone.
+Summed projected bounding-box area is a proxy; it is not a count of hardware coverage tests. Projected metrics include occluded faces.
+summary.csv has all screened and confirmed methods; view_comparisons.csv retains every orientation and control exclusion.
+raw_validation.txt records reconstructed timestamp summaries and count checks; preflight/ is exploratory and excluded from the study.

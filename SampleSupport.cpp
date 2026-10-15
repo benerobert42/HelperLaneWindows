@@ -40,6 +40,7 @@ std::string getVolumeTriangulationMethodName(uint32_t type)
 
 std::string getVolumeGeometryName(uint32_t type)
 {
+    if (const auto* preset = getStudyGeometryPreset(type)) return std::string("Study: ") + preset->name;
     if (type >= 8 && type - 8 < kObjModelPresets.size()) return kObjModelPresets[type - 8].name;
     switch (type)
     {

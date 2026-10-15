@@ -1,0 +1,17 @@
+{
+  "review_date": "2026-10-10",
+  "branch": "origin/3DScenes",
+  "revision": "0a485c78ce29377ad958ce7c9340b9ac8c93fac2",
+  "compiler": "MSVC 14.44.35207 x64",
+  "flags": "/O2 /DNDEBUG /EHsc /std:c++17 /MD",
+  "warmup_runs": 1,
+  "measured_runs_per_case": 5,
+  "cpu_timer": "std::chrono::steady_clock",
+  "scope": "Isolated CPU algorithms; no Falcor rendering, GPU measurements, file IO, meshoptimizer, or buffer uploads in timed regions",
+  "math": "Minimal scalar float2/float3 shim; original non-CDT algorithm bodies retained",
+  "excluded_methods": ["CDT", "CDT + Flips"],
+  "default_patch_options": {"normal_deviation_degrees": 15, "relative_plane_deviation": 0.005, "max_faces": 64},
+  "method_label_note": "PCL Greedy Projection and LMT MWT are the branch's custom heuristics; not official PCL or exact MWT",
+  "gpu_measurements": "unavailable",
+  "software_quad_model": "One pixel-center sample per pixel; each triangle schedules four lanes in every 2x2 quad containing at least one covered pixel; no depth, MSAA, clipping or hardware quantization"
+}

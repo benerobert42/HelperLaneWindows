@@ -1,0 +1,24 @@
+diff --git a/Source/Falcor/Core/API/GpuTimer.cpp b/Source/Falcor/Core/API/GpuTimer.cpp
+index f10ed075..48215ade 100644
+--- a/Source/Falcor/Core/API/GpuTimer.cpp
++++ b/Source/Falcor/Core/API/GpuTimer.cpp
+@@ -126,6 +126,7 @@ void GpuTimer::resolve()
+     // This should be batched across all active timers and results copied into a single staging buffer once per frame instead.
+ 
+     // Resolve timestamps into buffer.
++    mpDevice->getRenderContext()->resourceBarrier(mpResolveBuffer.get(), Resource::State::CopyDest);
+     auto encoder = mpDevice->getRenderContext()->getLowLevelData()->getResourceCommandEncoder();
+ 
+     encoder->resolveQuery(mpDevice->getTimestampQueryHeap()->getGfxQueryPool(), mStart, 2, mpResolveBuffer->getGfxBufferResource(), 0);
+@@ -159,9 +160,8 @@ double GpuTimer::getElapsedTime()
+         result[1] = pRes[1];
+         mpResolveStagingBuffer->unmap();
+ 
+-        double start = (double)result[0];
+-        double end = (double)result[1];
+-        double range = end - start;
++        // Subtract integer timestamps before conversion to preserve short intervals.
++        double range = static_cast<double>(result[1] - result[0]);
+         mElapsedTime = range * mpDevice->getGpuTimestampFrequency();
+         mDataPending = false;
+     }

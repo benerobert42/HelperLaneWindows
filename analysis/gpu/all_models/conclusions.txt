@@ -1,0 +1,66 @@
+Triangulation choice by geometry
+
+27 named fixtures/models; every general backend/variant screened, plus applicable grid/surgery methods.
+Longer core confirmation compares Source/SourceControl/CDT/Heap3D/Star3D.
+Counts and source vertex attributes remain fixed. A method must preserve the sampled surface within 0.1% to enter strict recommendations.
+Controls: <=2% absolute SourceControl mean and <=3% worst block drift per pose; at least 12 eligible conditions for a model-level recommendation.
+Material mean draw gain threshold: 3%; practical calibration rule, not a significance test.
+Percentages average matched per-pose ratios. Angle ranges and excluded conditions remain in the CSVs.
+No vendor occupancy/stall counters: PS/VS workload effects are measured; the critical GPU stage is not always identified.
+Identical meshoptimizer policy does not make every output index sequence identical. Connectivity and resulting cache/depth order can interact.
+
+model | MSAA | recommendation | draw change % | eligible | explanation
+blob | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+blob | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+blob_small | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+blob_small | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+bunny | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+bunny | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+clustered | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+clustered | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+cylinder | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+cylinder | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+cylinder_skew | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+cylinder_skew | 4 | HeapQuadWarm | -16.88 | 24/24 | Offline connectivity preprocessing is worth testing
+ellipse2d | 1 | HeapLoose | -69.60 | 24/24 | Offline connectivity preprocessing is worth testing
+ellipse2d | 4 | HeapLoose | -79.85 | 21/24 | Offline connectivity preprocessing is worth testing
+ellipsoid | 1 | HeapQuadView | -3.97 | 22/24 | Offline connectivity preprocessing is worth testing
+ellipsoid | 4 | HeapQuadView | -6.00 | 22/24 | Offline connectivity preprocessing is worth testing
+ellipsoid_small | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+ellipsoid_small | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+folded | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+folded | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+jittered | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+jittered | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+jittered_planar | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+jittered_planar | 4 | HeapQuadView | -3.73 | 23/24 | Offline connectivity preprocessing is worth testing
+obj:analysis/gpu/orientation/models/GraphExHeart.obj | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+obj:analysis/gpu/orientation/models/GraphExHeart.obj | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+obj:analysis/gpu/orientation/models/GraphExTangleCube.obj | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+obj:analysis/gpu/orientation/models/GraphExTangleCube.obj | 4 | HeapPlane | -3.46 | 16/24 | Offline connectivity preprocessing is worth testing
+planar | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+planar | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+saddle_branch | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+saddle_branch | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew1 | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew1 | 4 | CDT | -4.80 | 22/24 | Offline connectivity preprocessing is worth testing
+skew2 | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew2 | 4 | CDTFlip | -17.44 | 21/24 | Offline connectivity preprocessing is worth testing
+skew3 | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew3 | 4 | Heap3D | -23.23 | 23/24 | Offline connectivity preprocessing is worth testing
+skew_fold | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew_fold | 4 | HeapQuadView | -23.07 | 23/24 | Offline connectivity preprocessing is worth testing
+skew_saddle | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+skew_saddle | 4 | Star3D | -24.54 | 20/24 | Offline connectivity preprocessing is worth testing
+sphere | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+sphere | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+sphere_dense | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+sphere_dense | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+suzanne | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+suzanne | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+teapot | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+teapot | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+torus | 1 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+torus | 4 | Source + meshoptimizer | no confirmed >=3% mean gain | NA (no selected gain) | No material strict mean gain confirmed in the tested methods
+torus_skew | 1 | HeapWide | -8.30 | 20/24 | Offline connectivity preprocessing is worth testing
+torus_skew | 4 | HeapQuadView | -38.52 | 17/24 | Offline connectivity preprocessing is worth testing

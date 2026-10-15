@@ -184,7 +184,9 @@ int runRegressionChecks()
         }
         for (const auto& model : {std::array<uint32_t, 3>{8, 7958, 15744}, {9, 2503, 4968}, {10, 1292, 2464},
                                  {11, 1538, 3072}, {12, 3072, 6144}, {13, 2114, 4224},
-                                 {14, 24576, 49152}, {15, 7913, 15360}})
+                                 {14, 24576, 49152}, {15, 7913, 15360}, {16, 7656, 15308}, {17, 17800, 35616},
+                                 {18, 1538, 3072}, {19, 3072, 6144}, {20, 2114, 4224},
+                                 {21, 24576, 49152}, {22, 7913, 15360}})
         {
             const auto loaded = ObjMeshLoader::load(getModelPresetPath(model[0]).string());
             require(loaded.success && loaded.mesh.vertices.size() == model[1], "Preset must load through the OBJ pipeline");
@@ -193,6 +195,14 @@ int runRegressionChecks()
             require(MeshValidation::audit(source, source).topologyOK(), "Preset source must pass the topology audit");
             std::cout << getModelPresetPath(model[0]).filename().string() << ": " << model[1] << " vertices, " << model[2]
                       << " triangles\n";
+        }
+        for (const auto& preset : kStudyGeometryPresets)
+        {
+            const auto mesh = BenchmarkGeometry::make(preset.fixture);
+            const auto source = useSourceMeshTriangulation(mesh);
+            require(source.success && MeshValidation::audit(source, source).topologyOK(),
+                "Selectable study fixture must preserve a valid source triangulation");
+            std::cout << preset.fixture << ": selectable study source passed\n";
         }
         std::cout << "Regression checks passed.\n";
         return 0;

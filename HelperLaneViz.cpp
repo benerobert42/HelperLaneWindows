@@ -32,6 +32,7 @@
 
 #include "Import/ObjMeshLoader.h"
 #include "Import/ModelPresets.h"
+#include "Experiments/BenchmarkGeometry.h"
 #include "Triangulation/3D/ProceduralGeometry3D.h"
 #include "Triangulation/3D/Triangulation3D.h"
 #include "Triangulation/2D/TriangulationHelpers.h"
@@ -327,8 +328,10 @@ void HelperLaneViz::generateVolumeGeometry()
         mVolumeObjStatus.clear();
         mVolumeObjPolygonFaceCount = 0;
 
+        if (const auto* preset = getStudyGeometryPreset(mVolumeGeometryType))
+            sourceMesh = BenchmarkGeometry::make(preset->fixture);
         // Every OBJ preset shares the custom-OBJ importer (geometry type 7).
-        switch (isObjVolumeGeometry(mVolumeGeometryType) ? 7u : mVolumeGeometryType)
+        else switch (isObjVolumeGeometry(mVolumeGeometryType) ? 7u : mVolumeGeometryType)
         {
         case 1:
             sourceMesh = ProceduralGeometry3D::makeEllipsoid(
@@ -808,10 +811,13 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             {4, "Saddle Stress Patch"}, {5, "Folded Sheet"}, {6, "Clustered Wave Patch"}, {7, "OBJ File"}};
         for (uint32_t i = 0; i < kObjModelPresets.size(); ++i)
             geometries.push_back({8 + i, std::string(kObjModelPresets[i].name) + " (OBJ)"});
+        for (uint32_t i = 0; i < kStudyGeometryPresets.size(); ++i)
+            geometries.push_back({kStudyGeometryFirst + i, std::string("Study: ") + kStudyGeometryPresets[i].name});
         bool changed = w.dropdown("Volume Geometry", geometries, mVolumeGeometryType);
+        const auto* studyPreset = getStudyGeometryPreset(mVolumeGeometryType);
         if (changed)
         {
-            if (isObjVolumeGeometry(mVolumeGeometryType)) mVolumeTriangulationType = 3;
+            if (isObjVolumeGeometry(mVolumeGeometryType) || studyPreset) mVolumeTriangulationType = 3;
             else applyVolumeTargetVertexCount();
         }
         changed |= w.dropdown("Triangulation", {
@@ -822,6 +828,8 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
             if (mVolumeGeometryType == 7) changed |= w.textbox("OBJ Path", mVolumeObjPath);
             changed |= w.checkbox("Normalize OBJ to Scale", mVolumeNormalizeObj);
         }
+        else if (studyPreset)
+            w.text("Fixed study fixture: segment counts and scale match the benchmark.");
         else
         {
             if (w.var("Target Source Vertices", mVolumeTargetVertexCount, 9u, 16384u))
@@ -840,7 +848,7 @@ void HelperLaneViz::onGuiRender(Gui* pGui)
                 }
             }
         }
-        if (!isObjVolumeGeometry(mVolumeGeometryType) || mVolumeNormalizeObj)
+        if (!studyPreset && (!isObjVolumeGeometry(mVolumeGeometryType) || mVolumeNormalizeObj))
             changed |= w.var("Base Radius/Scale", mVolumeRadius, 0.01f, 5.0f);
         if (mVolumeTriangulationType != 3)
         {

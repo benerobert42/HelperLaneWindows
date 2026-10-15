@@ -1,0 +1,13 @@
+Geometry,Methods
+cylinder_skew,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadWarm"
+ellipse2d,"Source,SourceControl,CDT,Heap3D,Star3D,HeapLoose,HeapQuadWarm"
+ellipsoid,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadView"
+jittered_planar,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadView"
+obj:analysis/gpu/orientation/models/GraphExTangleCube.obj,"Source,SourceControl,CDT,Heap3D,Star3D,HeapPlane"
+skew1,"Source,SourceControl,CDT,Heap3D,Star3D,CDTFlip3D"
+skew2,"Source,SourceControl,CDT,Heap3D,Star3D,CDTFlip"
+skew3,"Source,SourceControl,CDT,Heap3D,Star3D,StarLoose"
+skew_fold,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadView"
+skew_saddle,"Source,SourceControl,CDT,Heap3D,Star3D,StarLoose"
+torus,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadWarm"
+torus_skew,"Source,SourceControl,CDT,Heap3D,Star3D,HeapQuadView,HeapWide"

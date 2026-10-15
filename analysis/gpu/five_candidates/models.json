@@ -1,0 +1,47 @@
+[
+  {
+    "Name": "SweptWing",
+    "Description": "Closed thin tapered/swept/twisted wing, sharp facets; intentionally dense planar triangle fans; balanced planar control.",
+    "Vertices": 1538,
+    "Triangles": 3072,
+    "BoundaryEdges": 0,
+    "Closed": true,
+    "SourceSHA256": "0d0aa54add4b27c354fecb963351087e22acd9f33bd8512222295a88db3cd1e3"
+  },
+  {
+    "Name": "ToothedWheel",
+    "Description": "Closed concave 12-tooth wheel with a central through-hole, sharp creases; dense planar fans; balanced planar control.",
+    "Vertices": 3072,
+    "Triangles": 6144,
+    "BoundaryEdges": 0,
+    "Closed": true,
+    "SourceSHA256": "68a894a504dc25be26f6da0b4b331eabb9c9f4f9a2dde4e63c4a9fd72c0262a7"
+  },
+  {
+    "Name": "FacetedArch",
+    "Description": "Closed U-shaped curved beam with planar front/back panels and inner/outer facets; dense planar fans; balanced planar control.",
+    "Vertices": 2114,
+    "Triangles": 4224,
+    "BoundaryEdges": 0,
+    "Closed": true,
+    "SourceSHA256": "4ead602d01215aa990b3a91048224cfd8480c954ba209989e6b74fca8e86a43d"
+  },
+  {
+    "Name": "TrefoilKnot",
+    "Description": "Smooth closed self-occluding knot tube; integer helical UV shear of two tube samples per centerline ring; unsheared control.",
+    "Vertices": 24576,
+    "Triangles": 49152,
+    "BoundaryEdges": 0,
+    "Closed": true,
+    "SourceSHA256": "186eee02bc17f21f1f143e5d0dd8ccfb35b1c865e39d356cfb89380e0f85be64"
+  },
+  {
+    "Name": "SpiralRamp",
+    "Description": "Open two-turn helicoid with negative Gaussian curvature and sheared UV lattice; control only selects shorter cell diagonals.",
+    "Vertices": 7913,
+    "Triangles": 15360,
+    "BoundaryEdges": 464,
+    "Closed": false,
+    "SourceSHA256": "4455d468f7c4a5e0adbc4a85675826e9de68fb8f161c075fc320b758063ad582"
+  }
+]

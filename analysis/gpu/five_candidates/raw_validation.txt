@@ -1,0 +1,21 @@
+Validated confirm_FacetedArch_lit_1080_q8.csv: 1008 cases, 129024 raw samples
+Validated confirm_SpiralRamp_lit_1080_q8.csv: 1008 cases, 129024 raw samples
+Validated confirm_SweptWing_lit_1080_q8.csv: 1008 cases, 129024 raw samples
+Validated confirm_ToothedWheel_lit_1080_q8.csv: 1008 cases, 129024 raw samples
+Validated confirm_TrefoilKnot_lit_1080_q8.csv: 1008 cases, 129024 raw samples
+Validated control_FacetedArch_lit_1080_q8.csv: 576 cases, 73728 raw samples
+Validated control_SpiralRamp_lit_1080_q8.csv: 576 cases, 73728 raw samples
+Validated control_SweptWing_lit_1080_q8.csv: 576 cases, 73728 raw samples
+Validated control_ToothedWheel_lit_1080_q8.csv: 576 cases, 73728 raw samples
+Validated control_TrefoilKnot_lit_1080_q8.csv: 576 cases, 73728 raw samples
+Validated large_FacetedArch_lit_1080_q8.csv: 720 cases, 92160 raw samples
+Validated large_SpiralRamp_lit_1080_q8.csv: 720 cases, 92160 raw samples
+Validated large_SweptWing_lit_1080_q8.csv: 720 cases, 92160 raw samples
+Validated large_ToothedWheel_lit_1080_q8.csv: 720 cases, 92160 raw samples
+Validated large_TrefoilKnot_lit_1080_q8.csv: 720 cases, 92160 raw samples
+Validated screen_FacetedArch_lit_1080_q8.csv: 1056 cases, 33792 raw samples
+Validated screen_SpiralRamp_lit_1080_q8.csv: 1056 cases, 33792 raw samples
+Validated screen_SweptWing_lit_1080_q8.csv: 1056 cases, 33792 raw samples
+Validated screen_ToothedWheel_lit_1080_q8.csv: 1056 cases, 33792 raw samples
+Validated screen_TrefoilKnot_lit_1080_q8.csv: 1056 cases, 33792 raw samples
+All 16800 cases and 1643520 raw samples verified. Results and geometry-held-out predictor scores written.

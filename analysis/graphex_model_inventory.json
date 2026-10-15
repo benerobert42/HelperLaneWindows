@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-10",
+  "scope": "OBJ asset inventory for a planned raster appearance feature; implicit extraction excluded by user request. Static topology statistics are not a full triangulation/reference audit.",
+  "graph_ex_implicit_template_count": 41,
+  "assets": [
+    {
+      "path": "C:\\Users\\RobertBene\\Documents\\Falcor\\Source\\Samples\\GraphEx\\Data\\Example\\Suzanne.obj",
+      "size_bytes": 1375791,
+      "sha256": "e41b8f753ec1a57a1cf7fd1017d2e58f26ee330fc29b2818b5a643be7c8b4e71",
+      "vertices": 7958,
+      "faces": 15744,
+      "face_sizes": {
+        "3": 15744
+      },
+      "boundary_edges": 168,
+      "nonmanifold_edges": 0,
+      "inconsistent_oriented_interior_edges": 0,
+      "parse_or_index_errors": 0,
+      "triangles": 15744
+    },
+    {
+      "path": "C:\\packman-repo\\chk\\falcor_media\\7acdf8b0\\test_scenes\\meshes\\bunny.obj",
+      "size_bytes": 198443,
+      "sha256": "c93e4a6fc6423194ff8b24de372d0a0632264290302a11d391f832313a0d55ef",
+      "vertices": 2503,
+      "faces": 4968,
+      "face_sizes": {
+        "3": 4968
+      },
+      "boundary_edges": 42,
+      "nonmanifold_edges": 0,
+      "inconsistent_oriented_interior_edges": 0,
+      "parse_or_index_errors": 0,
+      "triangles": 4968
+    },
+    {
+      "path": "C:\\packman-repo\\chk\\falcor_media\\7acdf8b0\\test_scenes\\meshes\\bunny_dense.obj",
+      "size_bytes": 4997671,
+      "sha256": "13750ef23bce58bad7aeadd788a158f9d13343c5f7dacd71ac2ecc0be7eda1e0",
+      "vertices": 34817,
+      "faces": 69630,
+      "face_sizes": {
+        "3": 69630
+      },
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_oriented_interior_edges": 0,
+      "parse_or_index_errors": 0,
+      "triangles": 69630
+    },
+    {
+      "path": "C:\\packman-repo\\chk\\falcor_media\\7acdf8b0\\test_scenes\\meshes\\teapot.obj",
+      "size_bytes": 152659,
+      "sha256": "153ba534a7f04c32f86a274432c4a2b290a248a385ed93e0d171bde9faf9c335",
+      "vertices": 1292,
+      "faces": 2464,
+      "face_sizes": {
+        "3": 2464
+      },
+      "boundary_edges": 120,
+      "nonmanifold_edges": 0,
+      "inconsistent_oriented_interior_edges": 0,
+      "parse_or_index_errors": 0,
+      "triangles": 2464
+    },
+    {
+      "path": "C:\\packman-repo\\chk\\falcor_media\\7acdf8b0\\test_scenes\\meshes\\lucy.obj",
+      "size_bytes": 6739675,
+      "sha256": "5fa586fd5b777bf2afd07c8363dddf23eab5c3258933c073d8a5aabfa2e30982",
+      "vertices": 49987,
+      "faces": 99970,
+      "face_sizes": {
+        "3": 99970
+      },
+      "boundary_edges": 0,
+      "nonmanifold_edges": 0,
+      "inconsistent_oriented_interior_edges": 0,
+      "parse_or_index_errors": 0,
+      "triangles": 99970
+    }
+  ],
+  "selected": [
+    "Suzanne.obj",
+    "bunny.obj",
+    "teapot.obj"
+  ],
+  "graph_ex_lipschitz_suzanne_is_identical": true
+}

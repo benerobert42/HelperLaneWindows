@@ -1,70 +1,78 @@
-# HelperLaneViz
+# HelperLaneWindows
 
-A Falcor sample application for visualizing and benchmarking GPU helper lane usage with various polygon triangulation methods.
+A Falcor raster sample for investigating how triangle connectivity affects helper-lane diagnostics and GPU draw cost. It supports planar polygons, 3D surface triangulation, OBJ import, and the existing GraphEx raster Phong preview. It does not render with ray tracing.
 
-## Setup
+## Build and open in VS2022
 
-This project must be added as a sample within the **Falcor repository**. Place this directory in:
+Place this repository in `Falcor/Source/Samples/HelperLaneWindows`, initialize its dependencies with `git submodule update --init --recursive`, and add `add_subdirectory(HelperLaneWindows)` to Falcor's `Source/Samples/CMakeLists.txt`.
+
+The measurements require the shared Falcor timer correction in [docs/falcor-gpu-timer.patch](docs/falcor-gpu-timer.patch). It restores the resolve buffer's CopyDest state before resolving reused timestamp queries and subtracts integer timestamps before conversion. **It is already applied in this local Falcor checkout.** On another checkout, from the Falcor root:
+
+```powershell
+git apply --check Source/Samples/HelperLaneWindows/docs/falcor-gpu-timer.patch
+git apply Source/Samples/HelperLaneWindows/docs/falcor-gpu-timer.patch
 ```
-Falcor/Source/Samples/HelperLaneViz/
+
+From the Falcor root, regenerate the existing solution and build:
+
+```powershell
+& .\tools\.packman\cmake\bin\cmake.exe -S . -B build/windows-vs2022-helperlanes -G 'Visual Studio 17 2022' -A x64 -T host=x64 '-DCMAKE_SYSTEM_VERSION=10.0.26100.0'
+& .\tools\.packman\cmake\bin\cmake.exe --build build/windows-vs2022-helperlanes --config Release --target HelperLaneWindows FalcorPython --parallel 6
 ```
 
-Ensure you have the Falcor repository cloned and properly configured before building.
+Open `build/windows-vs2022-helperlanes/Falcor.sln` in VS2022. Select **Release / x64**, set **HelperLaneWindows** as startup project, and run it. The SDK setting above is the tested local SDK. FalcorPython is needed because SampleApp initializes Python, including headless runs. CMake supplies source filters and deploys every OBJ preset beside the executable.
 
-## Build
+## Models and controls
 
-Build using CMake as part of the Falcor project. The sample will be available as `HelperLaneWindows` executable.
+The default is Volumetric / Sphere / Source Faces at 1920x1080. Controls and profiler are docked within a narrow left column by default; the docking checkbox permits free placement.
 
-## Configuration
+The Volume Geometry dropdown contains:
 
-**⚠️ IMPORTANT: You must configure file paths before running:**
+- Seven adjustable generators: sphere, anisotropic ellipsoid, jittered sphere, lumpy ellipsoid, saddle, folded sheet and clustered wave.
+- Fifteen OBJ presets: Suzanne, Bunny, Teapot, GraphEx Heart, GraphEx Tangle Cube, the five research candidates (Swept Wing, Toothed Wheel, Faceted Arch, Trefoil Knot, Spiral Ramp), and each candidate's control mesh.
+- Twenty-two `Study:` entries: the exact procedural fixtures used in the measurements, including density variants, regular/skew torus, tweaked/skew cylinder, skew grids/fold/saddle, and the planar ellipse. These reuse the benchmark generators and keep their source resolution/scale fixed.
+- A custom OBJ path through the same importer as the presets. See [asset provenance](Data/Models/README.md).
 
-1. **SVG File Path** (`HelperLaneViz.cpp`, line 113):
-   ```cpp
-   mSvgPath = "Path to your SVG file";
-   ```
-   Replace with the full path to your SVG file (e.g., `"C:/path/to/your/file.svg"`).
+Choose Helper Lanes, Wireframe or Lit Preview. Lit Preview reuses GraphEx's ambient/diffuse/Phong specular equations, point/directional light, attenuation, and material settings. Source normals stay fixed across triangulations. Helper counters require an explicit synchronous readback; enable them for diagnostics, not normal timing.
 
-2. **Screenshot Output Path** (`HelperLaneViz.cpp`, line 896):
-   ```cpp
-   std::string downloadsPath = "Folder to save your image";
-   ```
-   Replace with the directory where screenshots should be saved (e.g., `"C:/Users/YourName/Downloads"`).
+The interactive 3D methods are Source Faces, CDT, CDT + Flip, Greedy Point Set, experimental LMT and experimental Greedy Projection. The latter is custom PCL-inspired code, not the PCL library. The global heap, projected-cost and star experiments remain CLI research methods. Model selection does not introduce another triangulation implementation.
 
-3. **Benchmark Output Path** (`HelperLaneViz.cpp`, line 1067):
-   ```cpp
-   mBenchmarkFile.open("Folder to output your benchmark", ...);
-   ```
-   Replace with the full path to the benchmark output file (e.g., `"C:/path/to/benchmark_results.txt"`).
+## Reproducible screenshots
 
-## ImGUI Controls
+From this sample folder:
 
-The application provides the following controls:
+```powershell
+& ..\..\..\build\windows-vs2022-helperlanes\bin\Release\HelperLaneWindows.exe --screenshot analysis/screenshots/suzanne.json analysis/screenshots/suzanne.png
+```
 
-- **MSAA**: Enable/disable multi-sample anti-aliasing (1x, 2x, 4x, 8x, 16x)
-- **Use Circle**: Switch between SVG file or synthetic circle/ellipse generation
-- **Visualization**: Choose between Helper Lanes, Wireframe, or Texture modes
-- **Triangulation**: Select from 11 different triangulation algorithms (only CDT, CDT + flip, Earcut, Earcut + flip, Greedy Max Area and Minimum-Weight Triangulation is maintained and used)
-- **Use Mesh Optimizer**: Enable mesh optimization (vertex cache, overdraw, vertex fetch)
-- **Grid**: Configure grid instancing (columns/rows) for repeated rendering
-- **Read back helper lane count**: Display the number of helper lanes executed
-- **Measure triangulation time**: Enable CPU triangulation timing
-- **Run Benchmark**: Execute automated benchmark across multiple triangulation methods
-- **Benchmark Folder**: Benchmark all SVG files in a selected folder with MSAA off/4x and instance count 1/100x100
-- **Save Screenshot**: Capture the current render to PNG
+The [example recipe](analysis/screenshots/suzanne.json) fixes resolution, MSAA, rotation, visualization, triangulation and lighting. `model` accepts any OBJ preset name above, any exact `Study: ...` dropdown name, or an OBJ path relative to the recipe. Names use spaces, e.g. `"Swept Wing"`, `"GraphEx Heart"`, `"Study: Skew Torus"`. Triangulation IDs are 0 CDT, 1 CDT+Flip, 2 Greedy, 3 Source (default), 4 LMT, 5 Greedy Projection. Rotation is XYZ degrees applied X then Y then Z.
 
-## Measurements
+Capture uses one synchronous Falcor `captureToFile` call after resolve/blit and before UI. It writes lossless 8-bit RGB at the target dimensions, without crop, scaling, timestamps or another gamma transform. Fixed GPU/driver/build/settings are needed for pixel reproducibility. Invalid/fallback triangulations fail headless capture.
 
-### GPU Frame Time
-Displayed automatically in the ImGUI window when the profiler is enabled.
+## Measurements and findings
 
-### Helper Lane Count
-Enable "Read back helper lane count" checkbox to display the number of helper lanes executed during rendering.
+Read [Triangle connectivity: measurements, mechanisms and recommendations](docs/TRIANGULATION_PERFORMANCE.md) for the current conclusions, numerical tables, methodology, limits and proposed next experiments. That report supersedes historical performance claims in `analysis/*.md`, especially measurements made before the timer correction.
 
-### Triangulation Time
-Enable "Measure triangulation time" checkbox to measure CPU-side triangulation performance. The result is displayed as "Last triangulation: X.XXX ms".
+From the sample folder, a longer matched 1080p experiment:
 
-### Benchmarking
-Click "Run Benchmark" to automatically test multiple triangulation methods. Results are saved to the configured benchmark output file with columns
-"Benchmark Folder" allows batch processing of all SVG files in a directory, testing each with multiple triangulation methods and MSAA/grid configurations.
+```powershell
+& .\analysis\gpu\orientation\run_sweep.ps1 -Models 'ellipse2d,ellipsoid,torus_skew,suzanne' -Methods 'Source,SourceControl,CDT,Heap3D,HeapPlane'
+```
 
+This uses 24 separate-axis rotation conditions, 1x/4x MSAA, randomized repeated blocks, a bounded query queue, fixed vertex storage, uniform meshoptimizer cache/overdraw ordering, separate diagnostic draws, raw samples, and run metadata. **Draw** means indexed-draw GPU time; **Pass** includes clear/draw/MSAA resolve. Neither includes UI/presentation or measures complete presented-frame latency. GUI benchmarks use the same case/runner/writer core, but their FlatRaster workload is distinct from the CLI LitPreview workload. Do not pair unlike workloads.
+
+Saved summaries, manifests, figures and reusable scripts are tracked. Generated raw runs, logs, telemetry, temporary meshes, copied source snapshots and local harness/build files remain local and are ignored. The committed manifests preserve historical measured-source identities and raw-file hashes; they are not rewritten to claim a newer binary produced old results. Regenerating full analyses requires rerunning the benchmark or retaining those local raw files.
+
+## Layout and validation
+
+`Import/` contains SVG/OBJ loaders and model metadata. `Triangulation/2D` and `Triangulation/3D` contain their algorithms; common types/math/audits live at the triangulation root. `Rendering/` contains raster preview and capture; `Experiments/` contains benchmark cases, one measurement runner/result writer, metrics, fixtures and native checks. Falcor setup and controls stay in `HelperLaneViz.cpp/.h`.
+
+From the sample folder after building:
+
+```powershell
+& ..\..\..\build\windows-vs2022-helperlanes\bin\Release\HelperLaneWindows.exe --self-test
+& ..\..\..\build\windows-vs2022-helperlanes\bin\Release\HelperLaneWindows.exe --ui-smoke
+python analysis/test_summarize_gpu.py
+```
+
+Native checks cover import failures, deployed OBJ counts/topology, every selectable study fixture, surface triangulation, and guarded flips. UI smoke exercises the actual render/benchmark path, 1x/4x, state restoration and output failure handling.

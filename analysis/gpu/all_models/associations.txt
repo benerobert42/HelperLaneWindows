@@ -1,0 +1,58 @@
+Associations in the primary CDT/Heap3D confirmation only.
+Model/method means, at least 12 strict stable view conditions. Each geometry receives total weight 1 in prediction.
+Repeated views and Star copies are not independent observations. Correlations below are descriptive, not causal.
+Prediction: ridge linear fit with intercept, standardized training features, penalty 1, leave one geometry out.
+No model/parameter selection on held-out results. Negative R2 means worse than the weighted global-mean baseline.
+One GPU, fixed workload and small geometry set; these are generalization checks, not a validated universal cost model.
+
+MSAA 1: 34 geometry/method observations, 22 geometries
+Spearman correlations:
+  WorldLengthVsSource_pct: -0.285
+  ScreenLengthVsSource_pct: -0.279
+  ScreenL1VsSource_pct: -0.243
+  BBoxVsSource_pct: -0.266
+  HelpersVsSource_pct: +0.373
+  PSVsSource_pct: -0.176
+  VSVsSource_pct: -0.140
+  AltitudeVsSource_pct: +0.371
+  ShapeVsSource_pct: +0.381
+Spearman correlations excluding ellipse2d:
+  WorldLengthVsSource_pct: -0.467
+  ScreenLengthVsSource_pct: -0.461
+  ScreenL1VsSource_pct: -0.446
+  BBoxVsSource_pct: -0.519
+  HelpersVsSource_pct: +0.248
+  PSVsSource_pct: -0.205
+  VSVsSource_pct: +0.008
+  AltitudeVsSource_pct: +0.466
+  ShapeVsSource_pct: +0.451
+Held-out ScreenLengthVsSource_pct: R2=-0.510, RMSE=16.542 percentage points
+Held-out PSVsSource_pct + VSVsSource_pct: R2=-0.249, RMSE=15.044 percentage points
+Held-out ScreenLengthVsSource_pct + BBoxVsSource_pct + HelpersVsSource_pct: R2=+0.255, RMSE=11.616 percentage points
+Held-out ScreenLengthVsSource_pct + BBoxVsSource_pct + HelpersVsSource_pct + PSVsSource_pct + VSVsSource_pct: R2=+0.893, RMSE=4.401 percentage points
+
+MSAA 4: 32 geometry/method observations, 21 geometries
+Spearman correlations:
+  WorldLengthVsSource_pct: +0.833
+  ScreenLengthVsSource_pct: +0.808
+  ScreenL1VsSource_pct: +0.815
+  BBoxVsSource_pct: +0.659
+  HelpersVsSource_pct: -0.111
+  PSVsSource_pct: -0.036
+  VSVsSource_pct: -0.161
+  AltitudeVsSource_pct: -0.797
+  ShapeVsSource_pct: -0.809
+Spearman correlations excluding ellipse2d:
+  WorldLengthVsSource_pct: +0.810
+  ScreenLengthVsSource_pct: +0.780
+  ScreenL1VsSource_pct: +0.781
+  BBoxVsSource_pct: +0.586
+  HelpersVsSource_pct: -0.349
+  PSVsSource_pct: -0.257
+  VSVsSource_pct: -0.011
+  AltitudeVsSource_pct: -0.795
+  ShapeVsSource_pct: -0.822
+Held-out ScreenLengthVsSource_pct: R2=+0.657, RMSE=8.450 percentage points
+Held-out PSVsSource_pct + VSVsSource_pct: R2=-3.633, RMSE=31.074 percentage points
+Held-out ScreenLengthVsSource_pct + BBoxVsSource_pct + HelpersVsSource_pct: R2=+0.696, RMSE=7.961 percentage points
+Held-out ScreenLengthVsSource_pct + BBoxVsSource_pct + HelpersVsSource_pct + PSVsSource_pct + VSVsSource_pct: R2=+0.631, RMSE=8.776 percentage points
