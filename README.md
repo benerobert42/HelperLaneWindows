@@ -53,6 +53,8 @@ Capture uses one synchronous Falcor `captureToFile` call after resolve/blit and 
 
 Read [Triangle connectivity: measurements, mechanisms and recommendations](docs/TRIANGULATION_PERFORMANCE.md) for the current conclusions, numerical tables, methodology, limits and proposed next experiments. That report supersedes historical performance claims in `analysis/*.md`, especially measurements made before the timer correction.
 
+For the full cross-platform workload specification, see [Reproducing the surface measurements on macOS](docs/MACOS_SURFACE_REPLICATION.md). It includes all 90 run configurations, recorded case order, source snapshots, asset hashes, and the requirements for equivalent Metal measurement scopes; the existing runner is D3D12.
+
 From the sample folder, a longer matched 1080p experiment:
 
 ```powershell
