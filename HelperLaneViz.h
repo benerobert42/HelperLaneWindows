@@ -215,6 +215,7 @@ private:
     void uploadGeometry();
     void uploadVolumeGeometry();
     void loadSvg(const std::string& path);
+    void frameSvgForCapture(const std::string& path);
     void generateCircle();
     void generateVolumeGeometry();
     void applyVolumeTargetVertexCount();

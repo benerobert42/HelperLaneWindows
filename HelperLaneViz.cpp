@@ -125,15 +125,16 @@ void HelperLaneViz::onLoad(RenderContext* pRenderContext)
     pVbLayout3D->addElement("POSITION", 0, ResourceFormat::RGB32Float, 1, 0);
     mpLayout3D->addBufferLayout(0, pVbLayout3D);
 
-    mSvgPath = "Path to your SVG file";
+    if (mSvgPath.empty()) mSvgPath = "Path to your SVG file";
     if (mGeometryDimensionality == GeometryDimensionality::Planar)
     {
         if (mUseCircle) generateCircle();
         else loadSvg(mSvgPath);
     }
-    generateVolumeGeometry();
-    if (mCaptureAndExit && !mVolumeResultValid)
+    else generateVolumeGeometry();
+    if (mCaptureAndExit && mGeometryDimensionality == GeometryDimensionality::Volumetric && !mVolumeResultValid)
         throw std::runtime_error("Screenshot requires a valid triangulation: " + mVolumeObjStatus);
+    if (mCaptureAndExit && !mIndexCount) throw std::runtime_error("Screenshot geometry is empty");
 
     getDevice()->getProfiler()->setEnabled(true);
 
@@ -191,6 +192,7 @@ void HelperLaneViz::loadSvg(const std::string& path)
     const bool loaded = SVGLoader::TessellateSvgToMesh(path, mVertices, mIndices, triangulator, mMaxBezierDeviation);
     if (loaded)
     {
+        if (mCaptureAndExit) frameSvgForCapture(path);
         if (mUseMeshOptimizer)
         {
             optimizeMesh();

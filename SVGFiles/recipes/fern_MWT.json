@@ -1,0 +1,9 @@
+{
+  "model": "../fern.svg",
+  "width": 2048,
+  "height": 2048,
+  "msaa": 8,
+  "method": 1,
+  "visualization": "wireframe",
+  "bezierDeviation": 1.0
+}

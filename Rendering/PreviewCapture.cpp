@@ -1,8 +1,11 @@
 #include "HelperLaneViz.h"
 #include "Import/ModelPresets.h"
+#include "Import/SVGLoader.h"
+#include "Triangulation/ShaderTypes.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -16,6 +19,20 @@ void HelperLaneViz::renderLitPreview(RenderContext* context, const ref<Fbo>& tar
         mVolumeGridLayers, mVolumeUse3DInstancing ? 1u : 0u, mVolumeGridSpacing, float2(0.f)};
     mLitPreview.draw(context, target, mpVB, mpIB, mVolumeVertices, mVolumeCachedBaseline.indices,
         mIndexCount, camera, VolumeModelParams{mVolumeModelTransform}, grid, cameraPosition, mLitSettings);
+}
+
+void HelperLaneViz::frameSvgForCapture(const std::string& path)
+{
+    // The interactive loader normalizes each axis independently. Restore
+    // SVG proportions for capture, with 5% margins and SVG's downward Y.
+    float2 lo(std::numeric_limits<float>::infinity()), hi(-std::numeric_limits<float>::infinity());
+    for (const auto& shape : SVGLoader::ParseSvgToShapes(path, mMaxBezierDeviation))
+        for (const auto& v : shape.outerBoundary) { lo = math::min(lo, v.pos); hi = math::max(hi, v.pos); }
+    const float2 size = hi - lo;
+    if (!(size.x > 0 && size.y > 0)) throw std::runtime_error("SVG screenshot has invalid bounds");
+    float2 fit = size / float2(float(getTargetFbo()->getWidth()), float(getTargetFbo()->getHeight()));
+    fit *= 0.9f / std::max(fit.x, fit.y);
+    for (auto& v : mVertices) { v.pos = (v.pos - float2(0.5f)) * fit + float2(0.5f); v.pos.y = 1.f - v.pos.y; }
 }
 
 void HelperLaneViz::saveScreenshot(const ref<Fbo>& target)
@@ -47,7 +64,7 @@ int runScreenshot(int argc, char** argv)
         std::ifstream input(argv[2]);
         if (!input) throw std::runtime_error("Cannot open screenshot recipe");
         const Json recipe = Json::parse(input);
-        const std::set<std::string> keys{"model", "width", "height", "msaa", "method", "visualization", "rotation", "lighting"};
+        const std::set<std::string> keys{"model", "width", "height", "msaa", "method", "visualization", "rotation", "lighting", "bezierDeviation"};
         if (!recipe.is_object()) throw std::runtime_error("Screenshot recipe must be an object");
         for (const auto& item : recipe.items())
             if (!keys.count(item.key())) throw std::runtime_error("Unknown recipe field: " + item.key());
@@ -64,8 +81,19 @@ int runScreenshot(int argc, char** argv)
         app.cntMSAA = recipe.value("msaa", 4u);
         if (app.cntMSAA != 1 && app.cntMSAA != 2 && app.cntMSAA != 4 && app.cntMSAA != 8)
             throw std::runtime_error("MSAA must be 1, 2, 4, or 8");
-        app.mGeometryDimensionality = HelperLaneViz::GeometryDimensionality::Volumetric;
         const std::string model = recipe.value("model", "Suzanne");
+        const bool planar = std::filesystem::path(model).extension() == ".svg";
+        app.mGeometryDimensionality = planar ? HelperLaneViz::GeometryDimensionality::Planar : HelperLaneViz::GeometryDimensionality::Volumetric;
+        if (planar)
+        {
+            app.mUseCircle = false;
+            app.mSvgPath = (std::filesystem::path(argv[2]).parent_path() / model).string();
+            app.mTriangulationType = recipe.value("method", 7u);
+            app.mMaxBezierDeviation = recipe.value("bezierDeviation", 1.f);
+            app.mUseMeshOptimizer = true;
+            if (app.mTriangulationType > 10 || !std::isfinite(app.mMaxBezierDeviation) || app.mMaxBezierDeviation <= 0)
+                throw std::runtime_error("SVG method must be 0..10 and Bezier deviation must be positive");
+        }
         app.mVolumeGeometryType = 7;
         app.mVolumeObjPath = (std::filesystem::path(argv[2]).parent_path() / model).string();
         for (uint32_t i = 0; i < kObjModelPresets.size(); ++i)
@@ -73,11 +101,13 @@ int runScreenshot(int argc, char** argv)
         for (uint32_t i = 0; i < kStudyGeometryPresets.size(); ++i)
             if (model == std::string("Study: ") + kStudyGeometryPresets[i].name) app.mVolumeGeometryType = kStudyGeometryFirst + i;
         app.mVolumeTriangulationType = recipe.value("method", 3u);
-        if (app.mVolumeTriangulationType > 5) throw std::runtime_error("Method must be 0..5 (3 = Source Faces)");
+        if (!planar && app.mVolumeTriangulationType > 5) throw std::runtime_error("Method must be 0..5 (3 = Source Faces)");
         const std::map<std::string, HelperLaneViz::VizMode> modes{
             {"lit", HelperLaneViz::VizMode::LitPreview}, {"wireframe", HelperLaneViz::VizMode::Wireframe},
             {"helpers", HelperLaneViz::VizMode::HelperLanes}};
-        app.mVizMode = modes.at(recipe.value("visualization", "lit"));
+        app.mVizMode = modes.at(recipe.value("visualization", planar ? "wireframe" : "lit"));
+        if (planar && app.mVizMode == HelperLaneViz::VizMode::LitPreview)
+            throw std::runtime_error("Lit preview requires a surface model");
         const float3 rotation = readVector(recipe.value("rotation", Json::array({0.f, 0.f, 0.f})));
         app.mVolumeModelTransform = mul(math::matrixFromRotationZ(math::radians(rotation.z)),
             mul(math::matrixFromRotationY(math::radians(rotation.y)), math::matrixFromRotationX(math::radians(rotation.x))));
