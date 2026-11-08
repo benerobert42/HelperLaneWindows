@@ -72,7 +72,12 @@ target_sources(HelperLaneWindows PRIVATE
     Experiments/InteractiveSmoke.cpp
     Experiments/InteractiveBenchmark.cpp
     Experiments/PerformanceBenchmark.cpp
+    Experiments/BenchmarkPreparation.cpp
+    Experiments/BenchmarkPreparation.h
+    Experiments/PlanarBenchmark.cpp
+    Experiments/PlanarBenchmark.h
     Experiments/RegressionChecks.cpp
+    Experiments/SurfaceConstructionAudit.cpp
     Experiments/BenchmarkGeometry.cpp
     Experiments/BenchmarkGeometry.h
     Experiments/RasterMetrics.h

@@ -12,6 +12,15 @@
 #define USE_3D_GEOMETRY 0
 #endif
 
+// CLI-only reproduction of the paper's original texture workload.
+#ifndef PAPER_PLANAR_TEXTURE
+#define PAPER_PLANAR_TEXTURE 0
+#endif
+#if PAPER_PLANAR_TEXTURE && VIZ_MODE == 2
+Texture2D<float4> gDummyTexture;
+SamplerState gDummySampler;
+#endif
+
 struct VSIn
 {
     float3 pos : POSITION;
@@ -123,7 +132,11 @@ float4 psMain(V2P input) : SV_Target
 #elif VIZ_MODE == 1
     return float4(0, 0, 0, 1);
 #else
+#if PAPER_PLANAR_TEXTURE
+    return gDummyTexture.Sample(gDummySampler, input.pos.xy * 0.5 + 0.5);
+#else
     // Internal benchmark workload: opaque flat rasterization, no diagnostics.
     return float4(1, 1, 1, 1);
+#endif
 #endif
 }

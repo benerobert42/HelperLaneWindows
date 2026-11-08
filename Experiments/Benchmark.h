@@ -18,6 +18,7 @@ struct MeshMetrics
     double reverseReferenceError = 0, referenceBudget = 0;
     bool surfaceEquivalent = true;
     std::string experimentClass = "Strict";
+    std::string constructionMessage;
     int32_t triangulationStatus = -1;
     uint32_t patchCount = 0, changedTriangles = 0;
     bool structuralValid = false;
@@ -79,6 +80,7 @@ private:
         Falcor::ref<Falcor::GpuTimer> draw, pass;
         uint64_t fenceValue = 0;
     };
+    void collect(const Slot& slot);
     Falcor::ref<Falcor::Device> mpDevice;
     Falcor::ref<Falcor::Fence> mpFence;
     std::vector<Slot> mSlots;

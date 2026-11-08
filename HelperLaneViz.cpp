@@ -944,12 +944,15 @@ void HelperLaneViz::onHotReload(HotReloadFlags reloaded) {}
 
 int runPerformanceBenchmark(int argc, char** argv);
 int runRegressionChecks();
+int runSurfaceConstructionAudit(const char* directory);
 int runInteractiveSmoke();
 
 int runMain(int argc, char** argv)
 {
     if (argc > 1 && std::string(argv[1]) == "--ui-smoke")
         return runInteractiveSmoke();
+    if (argc == 3 && std::string(argv[1]) == "--audit-surface")
+        return runSurfaceConstructionAudit(argv[2]);
     if (argc > 1 && std::string(argv[1]) == "--self-test")
         return runRegressionChecks();
     if (argc > 1 && std::string(argv[1]) == "--perf")

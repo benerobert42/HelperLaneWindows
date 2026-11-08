@@ -66,6 +66,10 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"SurfaceEquivalent", number(m.surfaceEquivalent)},
         {"ExperimentClass", BenchmarkSupport::csvField(m.experimentClass)},
         {"TriangulationStatus", number(m.triangulationStatus)},
+        {"ConstructionMessage", BenchmarkSupport::csvField(m.constructionMessage)},
+        {"ValidationStatus", m.triangulationStatus == 2 ? "SourceFallback" :
+            !m.structuralValid ? "StructuralRejected" : !m.surfaceEquivalent ? "SurfaceRejected" :
+            m.valid ? "Accepted" : "ConstructionRejected"},
         {"PatchCount", number(m.patchCount)},
         {"ChangedTriangles", number(m.changedTriangles)},
         {"StructuralValid", number(m.structuralValid)},
@@ -74,7 +78,7 @@ Row summaryRow(const Result& r, const BenchmarkSupport::Statistics& draw, const 
         {"EulerCharacteristic", number(m.audit.euler)},
         {"MaxValence", number(m.audit.maxValence)},
         {"ValenceVariance", number(m.audit.valenceVariance)},
-        {"ValidForRanking", number(r.complete && m.valid && m.surfaceEquivalent && r.counts.active > 0)},
+        {"ValidForRanking", number(r.complete && m.valid && m.surfaceEquivalent && m.triangulationStatus != 2 && r.counts.active > 0)},
         {"Flips", number(m.flips)},
         {"StarReplacements", number(m.starReplacements)},
         {"TotalEdgeLength3D", number(m.audit.edgeLength)},
@@ -157,16 +161,21 @@ void Runner::start(Case description)
     mStarted = true;
 }
 
+void Runner::collect(const Slot& slot)
+{
+    const Sample sample{slot.draw->getElapsedTime(), slot.pass->getElapsedTime()};
+    if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
+        throw std::runtime_error("Invalid GPU draw/pass sample");
+    mResult.samples.push_back(sample);
+}
+
 void Runner::drain()
 {
     while (mResult.samples.size() < mIssued)
     {
         auto& slot = mSlots[mResult.samples.size() % mSlots.size()];
         mpFence->wait(slot.fenceValue);
-        const Sample sample{slot.draw->getElapsedTime(), slot.pass->getElapsedTime()};
-        if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
-            throw std::runtime_error("Invalid GPU draw/pass sample");
-        mResult.samples.push_back(sample);
+        collect(slot);
     }
 }
 
@@ -181,12 +190,7 @@ bool Runner::step(Falcor::RenderContext* context, const Work& work)
         if (mIssued - mResult.samples.size() == mSlots.size() || mIssued == mResult.description.samples)
             mpFence->wait(slot.fenceValue);
         if (mpFence->getCurrentValue() >= slot.fenceValue)
-        {
-            const Sample sample{slot.draw->getElapsedTime(), slot.pass->getElapsedTime()};
-            if (!(sample.drawMs > 0 && std::isfinite(sample.drawMs) && sample.passMs >= sample.drawMs && std::isfinite(sample.passMs)))
-                throw std::runtime_error("Invalid GPU draw/pass sample");
-            mResult.samples.push_back(sample);
-        }
+            collect(slot);
     }
     if (mWarmupRemaining)
     {

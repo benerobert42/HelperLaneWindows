@@ -1,0 +1,30 @@
+{
+  "inputs": [
+    {
+      "scene": "S",
+      "file": "Data\\PlanarPaper\\2051667.svg",
+      "original": "C:\\Users\\RobertBene\\Documents\\HelperLaneWindows\\SVGFiles\\2051667.svg",
+      "sha256": "b62e2880224ab534d33c9cb634e8ee1ce5ef4d8be2a171aaf11358e4b6f8a728"
+    },
+    {
+      "scene": "7",
+      "file": "Data\\PlanarPaper\\2052065.svg",
+      "original": "C:\\Users\\RobertBene\\Documents\\HelperLaneWindows\\SVGFiles\\2052065.svg",
+      "sha256": "19e342c8c79e79b1040cd14b108f0d6d08bdb83f1bb03b1d251564791dea427b"
+    },
+    {
+      "scene": "2",
+      "file": "Data\\PlanarPaper\\2052150.svg",
+      "original": "C:\\Users\\RobertBene\\Documents\\HelperLaneWindows\\SVGFiles\\2052150.svg",
+      "sha256": "7ffe92937e5de9c6ff7b391ff49a82d99a99ad9ef4a1908e7e067b467a76a4cd"
+    }
+  ],
+  "bezier_deviation": 1.0,
+  "meshoptimizer": {
+    "vertex_cache": true,
+    "overdraw": true,
+    "overdraw_threshold": 1.05,
+    "vertex_fetch": true
+  },
+  "settings_provenance": "Original SVG bytes and procedural/grid defaults; complete meshoptimizer pipeline explicitly required for this rerun."
+}
