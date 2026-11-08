@@ -1,4 +1,5 @@
 #include "Triangulation/2D/TriangulationHelpers.h"
+#include "Triangulation/SurfaceGeometryMath.h"
 #include "Falcor.h"
 
 #include <include/mapbox/earcut.hpp>
@@ -1305,6 +1306,7 @@ struct EdgeAdj
     int t1 = -1;
     uint32_t opp0 = 0;
     uint32_t opp1 = 0;
+    uint32_t count = 0;
     uint32_t ver = 0; // bump on any mutation
 };
 
@@ -1320,7 +1322,7 @@ inline EdgeKey makeKey(uint32_t u, uint32_t v)
 inline std::array<uint32_t, 3> makeCCW(const std::vector<Vertex>& v, uint32_t i0, uint32_t i1, uint32_t i2)
 {
     // If (i0,i1,i2) is CCW keep, else swap i1/i2
-    if (cross2D(v[i0].pos, v[i1].pos, v[i2].pos) >= 0.0f)
+    if (orient2D(v[i0], v[i1], v[i2]) >= 0.0)
     {
         return {i0, i1, i2};
     }
@@ -1337,7 +1339,8 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
     std::vector<uint32_t> indices,
     int maxFlips,
     int maxPops,
-    const std::vector<float3>* surfaceVertices
+    const std::vector<float3>* surfaceVertices,
+    const FlipAdmission* admission
 )
 {
     if (surfaceVertices && surfaceVertices->size() != vertices.size()) return indices;
@@ -1362,6 +1365,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         auto& edge = adj[key];
         // any write mutates bump version
         ++edge.ver;
+        if (++edge.count > 2) return;
         if (edge.t0 == -1)
         {
             edge.t0 = triangle;
@@ -1402,6 +1406,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
             auto& E = it->second;
             // any write mutates bump version
             ++E.ver;
+            --E.count;
             if (E.t0 == t)
             {
                 E.t0 = -1;
@@ -1452,6 +1457,27 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         return dot(diff, diff);
     };
 
+    auto validReplacement = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+    {
+        if (a == b || a == c || a == d || b == c || b == d || c == d || !isConvexQuad(vertices, a, b, c, d)) return false;
+        const auto existing = adj.find(makeKey(c, d));
+        if (existing != adj.end() && existing->second.count) return false;
+        if (!admission) return true;
+        if (admission->admitsDiagonal && !admission->admitsDiagonal(c, d)) return false;
+        const auto t0 = makeCCW(vertices, c, d, a), t1 = makeCCW(vertices, d, c, b);
+        for (const auto& triangle : {t0, t1})
+        {
+            if (!(orient2D(vertices[triangle[0]], vertices[triangle[1]], vertices[triangle[2]]) > admission->minProjectedDoubleArea))
+                return false;
+            if (admission->surfacePositions)
+            {
+                const auto& p = *admission->surfacePositions;
+                if (!SurfaceGeometryMath::hasStableTriangleArea(p[triangle[0]], p[triangle[1]], p[triangle[2]])) return false;
+            }
+        }
+        return true;
+    };
+
     auto tryPushEdge = [&](const EdgeKey& k)
     {
         auto it = adj.find(k);
@@ -1460,7 +1486,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
             return;
         }
         const auto& E = it->second;
-        if (E.t0 == -1 || E.t1 == -1)
+        if (E.count != 2 || E.t0 < 0 || E.t1 < 0 || E.t0 == E.t1)
         {
             return; // Edge is not 2 sided (likely boundary)
         }
@@ -1468,7 +1494,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         const uint32_t b = k.b;
         const uint32_t c = E.opp0;
         const uint32_t d = E.opp1;
-        if (!isConvexQuad(vertices, a, b, c, d))
+        if (!validReplacement(a, b, c, d))
         {
             return;
         }
@@ -1521,7 +1547,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         {
             continue;
         }
-        if (E.t0 == -1 || E.t1 == -1)
+        if (E.count != 2 || E.t0 < 0 || E.t1 < 0 || E.t0 == E.t1)
         {
             continue; // not interior
         }
@@ -1533,7 +1559,7 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         const int t1 = E.t1;
 
         // Re-check (neighbors may have moved but ver guard usually catches)
-        if (!isConvexQuad(vertices, a, b, c, d))
+        if (!validReplacement(a, b, c, d))
         {
             continue;
         }
@@ -1553,7 +1579,9 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
         const auto T0 = makeCCW(vertices, c, d, a);
         const auto T1 = makeCCW(vertices, d, c, b);
 
-        // Update mesh
+        if (admission && admission->acceptsSurface && !admission->acceptsSurface(a, b, c, d)) continue;
+
+        // Every admission check has passed. Rejected candidates never mutate indices.
         clearTriangle(t0);
         clearTriangle(t1);
         tri(t0, 0) = T0[0];

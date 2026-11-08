@@ -39,6 +39,16 @@ int runRegressionChecks()
                 for (uint32_t component = 0; component < 3; ++component)
                     require(angles[component] == (component == axis ? step * 45.0 : 0), "Axis sweep must rotate just the requested axis");
             }
+        sweep.axisSteps = 2;
+        sweep.axisAngles = {45, 135};
+        for (uint32_t axis = 0; axis < 3; ++axis)
+            for (uint32_t step = 0; step < 2; ++step)
+            {
+                const auto angles = BenchmarkOptions::rotationDegrees(sweep, axis * 2 + step);
+                for (uint32_t component = 0; component < 3; ++component)
+                    require(angles[component] == (component == axis ? 45.0 + step * 90.0 : 0.0),
+                            "Reduced sweep must match the six selected oblique poses of the original sweep");
+            }
         std::vector<Vertex> projected(4);
         projected[0].pos = Falcor::float2(0, 0);
         projected[1].pos = Falcor::float2(2, 0);
@@ -49,6 +59,15 @@ int runRegressionChecks()
         require(Triangulation::optimizeByMinLengthFlips(projected, diagonal) == diagonal, "Historical local flip metric preserved");
         auto surfaceFlip = Triangulation::optimizeByMinLengthFlips(projected, diagonal, -1, -1, &surface);
         require(surfaceFlip.size() == diagonal.size() && surfaceFlip != diagonal, "Explicit 3D metric flips the shorter surface diagonal");
+        Triangulation::FlipAdmission admission;
+        admission.surfacePositions = &surface;
+        admission.admitsDiagonal = [](uint32_t, uint32_t) { return false; };
+        require(Triangulation::optimizeByMinLengthFlips(projected, diagonal, -1, -1, &surface, &admission) == diagonal,
+                "Globally existing diagonals must be rejected before mutation");
+        admission.admitsDiagonal = {};
+        admission.acceptsSurface = [](uint32_t, uint32_t, uint32_t, uint32_t) { return false; };
+        require(Triangulation::optimizeByMinLengthFlips(projected, diagonal, -1, -1, &surface, &admission) == diagonal,
+                "Source-distance rejection must leave the initial CDT unchanged");
         Mesh quad;
         quad.vertices = {{0, 0, 0}, {2, 0, 0}, {3, 1, 0}, {1, 1, 0}};
         quad.faces = {{0, 1, 2}, {0, 2, 3}};

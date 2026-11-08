@@ -188,9 +188,10 @@ bool pointStrictlyInsideTriangle(const Falcor::float2& point, const Falcor::floa
     return (ab > 1e-6f && bc > 1e-6f && ca > 1e-6f) || (ab < -1e-6f && bc < -1e-6f && ca < -1e-6f);
 }
 
-float triangleSignedArea2(const std::vector<Vertex>& vertices, uint32_t a, uint32_t b, uint32_t c)
+double triangleSignedArea2(const std::vector<Vertex>& vertices, uint32_t a, uint32_t b, uint32_t c)
 {
-    return cross2(vertices[a].pos, vertices[b].pos, vertices[c].pos);
+    const auto p = vertices[a].pos, q = vertices[b].pos, r = vertices[c].pos;
+    return (double(q.x) - p.x) * (double(r.y) - p.y) - (double(q.y) - p.y) * (double(r.x) - p.x);
 }
 
 bool triangleContainsNoOtherPoint(const std::vector<Vertex>& vertices, uint32_t a, uint32_t b, uint32_t c)
@@ -279,14 +280,14 @@ void appendTriangleCCW(std::vector<uint32_t>& indices, const std::vector<Vertex>
     }
 }
 
-float polygonSignedArea2(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& polygon)
+double polygonSignedArea2(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& polygon)
 {
-    float area = 0.0f;
+    double area = 0.0;
     for (size_t i = 0; i < polygon.size(); ++i)
     {
         const Falcor::float2& a = vertices[polygon[i]].pos;
         const Falcor::float2& b = vertices[polygon[(i + 1) % polygon.size()]].pos;
-        area += a.x * b.y - a.y * b.x;
+        area += double(a.x) * b.y - double(a.y) * b.x;
     }
     return area;
 }

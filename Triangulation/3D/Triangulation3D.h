@@ -3,6 +3,8 @@
 #include "Falcor.h"
 
 #include <cstdint>
+#include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,12 +33,16 @@ struct PatchGrowthOptions
     float maxRelativePlaneDeviation = 0.005f;
     float minPlaneDeviation = 1e-5f;
     uint32_t maxFacesPerPatch = 64;
+    float maxAbsolutePlaneDeviation = std::numeric_limits<float>::infinity();
+    const std::vector<uint8_t>* protectedVertices = nullptr;
 };
 
 struct TriangulationOptions
 {
     Method method = Method::ConstrainedDelaunay;
     bool use3DEdgeLengthForGreedy = true;
+    bool preserveSourceDefects = false;
+    std::function<bool(uint32_t, uint32_t)> admitsDiagonal;
     // Explicit opt-in; existing CDTFlip/LMT ordering remains projected 2D by default.
     bool use3DEdgeLengthForFlips = false;
     uint32_t pclMaximumNearestNeighbors = 100;
@@ -66,6 +72,7 @@ struct Patch
     float maxPlaneDistance = 0.0f;
     float maxNormalDeviationDegrees = 0.0f;
     bool isDiskLike = false;
+    bool preserveSource = false;
     std::string message;
 };
 
@@ -100,7 +107,8 @@ const char* getMethodName(Method method);
 
 std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& options = {});
 
-PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, const TriangulationOptions& options = {});
+PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, const TriangulationOptions& options = {},
+    const MeshTriangulationResult* source = nullptr);
 
 // Prepared patches can be reused across methods for an unchanged source mesh.
 MeshTriangulationResult triangulatePreparedMesh(
@@ -122,6 +130,6 @@ MeshTriangulationResult triangulateMesh(
     const TriangulationOptions& triangulationOptions = {}
 );
 
-MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh);
+MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh, bool preserveDegenerateTriangles = false);
 
 } // namespace Triangulation3D

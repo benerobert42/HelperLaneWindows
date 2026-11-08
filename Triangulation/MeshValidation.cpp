@@ -63,9 +63,9 @@ Audit audit(const MeshResult& m, const MeshResult& source)
         if (!tris.insert(t).second)
             ++a.duplicates;
         float3 p = m.vertices[m.indices[i]], b = m.vertices[m.indices[i + 1]], c = m.vertices[m.indices[i + 2]];
-        double area = 0.5 * length(math::cross(b - p, c - p));
+        double area = triangleArea(p, b, c);
         a.area += area;
-        if (area < 1e-12)
+        if (area < kMinimumTriangleArea)
             ++a.degenerate;
     }
     a.used = uint32_t(used.size());
@@ -105,5 +105,51 @@ Audit audit(const MeshResult& m, const MeshResult& source)
         if (n.first == 1 && !edges.count(e))
             ++a.missingBoundary;
     return a;
+}
+std::vector<uint8_t> protectedSourceVertices(const MeshResult& source)
+{
+    std::vector<uint8_t> locked(source.vertices.size(), 0);
+    std::set<std::array<uint32_t, 3>> triangles;
+    for (size_t i = 0; i < source.indices.size(); i += 3)
+    {
+        std::array<uint32_t, 3> t{source.indices[i], source.indices[i + 1], source.indices[i + 2]};
+        const double area = 0.5 * length(math::cross(source.vertices[t[1]] - source.vertices[t[0]],
+                                                  source.vertices[t[2]] - source.vertices[t[0]]));
+        std::sort(t.begin(), t.end());
+        if (!triangles.insert(t).second || area < kMinimumTriangleArea)
+            for (auto v : t) locked[v] = 1;
+    }
+    for (const auto& [e, incidence] : edgeMap(source))
+        if (incidence.first > 2 || (incidence.first == 2 && incidence.second != 0))
+            locked[e.first] = locked[e.second] = 1;
+    return locked;
+}
+
+bool preservesSourceDefects(const MeshResult& candidate, const MeshResult& source, const Audit& a,
+                           const Audit& baseline, const std::vector<uint8_t>& locked)
+{
+    if (candidate.vertices.size() != source.vertices.size() || candidate.indices.size() != source.indices.size() ||
+        a.duplicates != baseline.duplicates || a.nonmanifold != baseline.nonmanifold || a.winding != baseline.winding ||
+        a.degenerate != baseline.degenerate || a.missingBoundary || a.unexpectedBoundary || a.used != baseline.used ||
+        a.components != baseline.components || a.euler != baseline.euler)
+        return false;
+    for (size_t i = 0; i < source.vertices.size(); ++i)
+        if (candidate.vertices[i].x != source.vertices[i].x || candidate.vertices[i].y != source.vertices[i].y ||
+            candidate.vertices[i].z != source.vertices[i].z) return false;
+    std::map<std::array<uint32_t, 3>, int64_t> frozen;
+    auto visit = [&](const MeshResult& mesh, int delta)
+    {
+        for (size_t i = 0; i < mesh.indices.size(); i += 3)
+        {
+            std::array<uint32_t, 3> t{mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]};
+            if (!locked[t[0]] && !locked[t[1]] && !locked[t[2]]) continue;
+            // Canonical cyclic rotation preserves winding as well as membership.
+            std::rotate(t.begin(), std::min_element(t.begin(), t.end()), t.end());
+            frozen[t] += delta;
+        }
+    };
+    visit(source, 1);
+    visit(candidate, -1);
+    return std::all_of(frozen.begin(), frozen.end(), [](const auto& item) { return item.second == 0; });
 }
 } // namespace MeshValidation

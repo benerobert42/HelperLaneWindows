@@ -4,6 +4,7 @@
 #include "Falcor.h"
 
 #include <vector>
+#include <functional>
 #include <cstdint>
 
 using namespace Falcor;
@@ -48,6 +49,15 @@ std::vector<uint32_t> earClippingMapbox(const std::vector<Vertex>& vertices);
 // Ear clipping using mapbox earcut, then optimized with edge flips to minimize total edge length.
 std::vector<uint32_t> earClippingMapboxFlipped(const std::vector<Vertex>& vertices);
 
+struct FlipAdmission
+{
+    double minProjectedDoubleArea = 1e-10;
+    const std::vector<float3>* surfacePositions = nullptr;
+    std::function<bool(uint32_t, uint32_t)> admitsDiagonal;
+    // Expensive fixed-reference queries run only immediately before mutation.
+    std::function<bool(uint32_t, uint32_t, uint32_t, uint32_t)> acceptsSurface;
+};
+
 // Optimize triangulation by flipping edges to minimize total edge length.
 // Uses a priority queue based approach for efficiency.
 std::vector<uint32_t> optimizeByMinLengthFlips(
@@ -55,7 +65,8 @@ std::vector<uint32_t> optimizeByMinLengthFlips(
     std::vector<uint32_t> indices,
     int maxFlips = -1,
     int maxPops = -1,
-    const std::vector<float3>* surfaceVertices = nullptr
+    const std::vector<float3>* surfaceVertices = nullptr,
+    const FlipAdmission* admission = nullptr
 );
 
 // Create vertices for an ellipse

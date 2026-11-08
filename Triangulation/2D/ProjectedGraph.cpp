@@ -91,7 +91,7 @@ std::vector<uint32_t> extractTrianglesFromPlanarGraph(const ProjectedPatch& patc
                 continue;
             }
 
-            const float faceArea = polygonSignedArea2(patch.projectedVertices, face);
+            const double faceArea = polygonSignedArea2(patch.projectedVertices, face);
             if (faceArea <= 1e-8f)
             {
                 continue;

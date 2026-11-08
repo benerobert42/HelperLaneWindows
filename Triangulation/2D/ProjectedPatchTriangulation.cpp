@@ -1,5 +1,6 @@
 #include "Triangulation/2D/ProjectedPatchTriangulation.h"
 #include "Triangulation/GeometryMath.h"
+#include "Triangulation/MeshValidation.h"
 #include "Triangulation/2D/ProjectedGeometry.h"
 
 #include "Triangulation/ShaderTypes.h"
@@ -50,14 +51,24 @@ bool simpleBoundary(const ProjectedPatch& patch)
     return true;
 }
 
-bool completeDisk(const ProjectedPatch& patch, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+const char* triangleFailure(const ProjectedPatch& patch, const std::vector<Vertex>& vertices, uint32_t a, uint32_t b, uint32_t c)
+{
+    if (!(triangleSignedArea2(vertices, a, b, c) > kMinimumTriangleArea2))
+        return "Projected triangle is reversed or has doubled area <= 1e-10.";
+    if (!patch.originalVertices.empty() && MeshValidation::triangleArea(
+            patch.originalVertices[a], patch.originalVertices[b], patch.originalVertices[c]) < MeshValidation::kMinimumTriangleArea)
+        return "Lifted triangle has area < 1e-12.";
+    return nullptr;
+}
+
+const char* diskFailure(const ProjectedPatch& patch, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
     // Keeping all input vertices and a simple oriented boundary allows checking
     // disk coverage without an all-pairs triangle intersection pass.
     if (vertices.size() != patch.projectedVertices.size() || indices.empty() || indices.size() % 3)
-        return false;
+        return "Vertex count changed or triangle list is empty/incomplete.";
     if (indices.size() / 3 != 2 * vertices.size() - patch.boundaryLoop.size() - 2)
-        return false;
+        return "Triangle count differs from 2m-h-2.";
     std::map<EdgeKey, std::pair<uint32_t, int>> edges;
     std::set<std::array<uint32_t, 3>> triangles;
     std::set<uint32_t> used;
@@ -67,10 +78,10 @@ bool completeDisk(const ProjectedPatch& patch, const std::vector<Vertex>& vertic
         std::array<uint32_t, 3> t = {indices[i], indices[i + 1], indices[i + 2]};
         for (auto j : t)
             if (j >= vertices.size())
-                return false;
+                return "Triangle index is out of range.";
         double signedArea = triangleSignedArea2(vertices, t[0], t[1], t[2]);
-        if (!(signedArea > 1e-10))
-            return false;
+        if (const auto* failure = triangleFailure(patch, vertices, t[0], t[1], t[2]))
+            return failure;
         area += signedArea;
         for (size_t k = 0; k < 3; ++k)
         {
@@ -82,7 +93,7 @@ bool completeDisk(const ProjectedPatch& patch, const std::vector<Vertex>& vertic
         }
         std::sort(t.begin(), t.end());
         if (!triangles.insert(t).second)
-            return false;
+            return "Duplicate triangle.";
     }
     std::set<EdgeKey> boundary;
     for (auto [a, b] : patch.boundaryEdges)
@@ -92,16 +103,18 @@ bool completeDisk(const ProjectedPatch& patch, const std::vector<Vertex>& vertic
         if (boundary.count(edge))
         {
             if (count.first != 1)
-                return false;
+                return "Boundary edge does not have exactly one incident triangle.";
         }
         else if (count.first != 2 || count.second != 0)
-            return false;
+            return "Interior edge incidence or winding is invalid.";
     }
     for (auto edge : boundary)
         if (!edges.count(edge))
-            return false;
+            return "A constrained boundary edge is missing.";
     const double targetArea = std::abs(polygonSignedArea2(vertices, patch.boundaryLoop));
-    return used.size() == vertices.size() && std::abs(area - targetArea) <= std::max(1e-9, targetArea * 1e-4);
+    if (used.size() != vertices.size()) return "An input vertex is unused.";
+    if (std::abs(area - targetArea) > std::max(1e-9, targetArea * 1e-4)) return "Projected area coverage differs from the boundary area.";
+    return nullptr;
 }
 
 PatchTriangulationResult makePatchResultFromLocalIndices(
@@ -132,9 +145,9 @@ PatchTriangulationResult makePatchResultFromLocalIndices(
         }
     }
 
-    result.success = completeDisk(patch, projectedVertices, result.indices);
-    result.message =
-        result.success ? "Patch triangulation succeeded." : "Patch triangulation failed disk coverage, winding, or topology checks.";
+    const auto* failure = diskFailure(patch, projectedVertices, result.indices);
+    result.success = !failure;
+    result.message = failure ? failure : "Patch triangulation succeeded.";
     return result;
 }
 
@@ -142,7 +155,8 @@ PatchTriangulationResult triangulatePatchWithTriangle(
     const ProjectedPatch& patch,
     const ProjectionFrame& frame,
     bool applyFlips,
-    bool surfaceFlips
+    bool surfaceFlips,
+    const Triangulation::FlipAdmission* admission
 )
 {
     PatchTriangulationResult result;
@@ -198,22 +212,19 @@ PatchTriangulationResult triangulatePatchWithTriangle(
         appendTriangleCCW(indices, projectedOutputVertices, static_cast<uint32_t>(a), static_cast<uint32_t>(b), static_cast<uint32_t>(c));
     }
 
-    if (applyFlips)
-    {
-        if (surfaceFlips && projectedOutputVertices.size() != patch.originalVertices.size())
-        {
-            result.message = "Surface metric requires unchanged vertices.";
-            return result;
-        }
-        indices = Triangulation::optimizeByMinLengthFlips(
-            projectedOutputVertices, std::move(indices), -1, -1, surfaceFlips ? &patch.originalVertices : nullptr
-        );
-    }
-
-    return makePatchResultFromLocalIndices(patch, projectedOutputVertices, std::move(indices), frame);
+    // Admit the initial CDT once. Subsequent flips preserve these invariants
+    // through FlipAdmission and must not trigger a post-optimization rollback.
+    result = makePatchResultFromLocalIndices(patch, projectedOutputVertices, std::move(indices), frame);
+    if (!result.success || !applyFlips) return result;
+    result.indices = Triangulation::optimizeByMinLengthFlips(
+        projectedOutputVertices, std::move(result.indices), -1, -1,
+        surfaceFlips ? &patch.originalVertices : nullptr, admission);
+    return result;
 }
 
 } // namespace
+
+bool hasValidBoundary(const ProjectedPatch& patch) { return simpleBoundary(patch); }
 
 bool triangulatePolygon(std::vector<uint32_t>& indices, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& boundary)
 {
@@ -228,17 +239,18 @@ bool triangulatePolygon(std::vector<uint32_t>& indices, const std::vector<Vertex
     // Preserve the historical diagonal on convex faces, including curved quads.
     for (size_t i = 1; i + 1 < boundary.size(); ++i)
         appendTriangleCCW(candidate, vertices, boundary[0], boundary[i], boundary[i + 1]);
-    if (!completeDisk(patch, vertices, candidate))
+    if (diskFailure(patch, vertices, candidate))
     {
         candidate.clear();
-        if (!appendEarClippedFace(candidate, vertices, boundary) || !completeDisk(patch, vertices, candidate))
+        if (!appendEarClippedFace(candidate, vertices, boundary) || diskFailure(patch, vertices, candidate))
             return false;
     }
     indices.insert(indices.end(), candidate.begin(), candidate.end());
     return true;
 }
 
-PatchTriangulationResult triangulate(const ProjectedPatch& input, const ProjectionFrame& frame, const TriangulationOptions& options)
+PatchTriangulationResult triangulate(const ProjectedPatch& input, const ProjectionFrame& frame, const TriangulationOptions& options,
+    const Triangulation::FlipAdmission* admission)
 {
     const auto& patch = input;
     if (!simpleBoundary(patch))
@@ -259,7 +271,7 @@ PatchTriangulationResult triangulate(const ProjectedPatch& input, const Projecti
     }
     if (options.method == Method::ConstrainedDelaunay || options.method == Method::ConstrainedDelaunayFlipped)
         return triangulatePatchWithTriangle(
-            patch, frame, options.method == Method::ConstrainedDelaunayFlipped, options.use3DEdgeLengthForFlips
+            patch, frame, options.method == Method::ConstrainedDelaunayFlipped, options.use3DEdgeLengthForFlips, admission
         );
     ProjectedPatch cached = input;
     const auto n = cached.projectedVertices.size();
@@ -277,10 +289,6 @@ PatchTriangulationResult triangulate(const ProjectedPatch& input, const Projecti
     }
     switch (options.method)
     {
-    case Method::ConstrainedDelaunay:
-        return triangulatePatchWithTriangle(patch, frame, false, options.use3DEdgeLengthForFlips);
-    case Method::ConstrainedDelaunayFlipped:
-        return triangulatePatchWithTriangle(patch, frame, true, options.use3DEdgeLengthForFlips);
     case Method::GreedyPointSet:
         return makePatchResultFromLocalIndices(
             cached, cached.projectedVertices, triangulateGreedyPointSet(cached, options.use3DEdgeLengthForGreedy), frame

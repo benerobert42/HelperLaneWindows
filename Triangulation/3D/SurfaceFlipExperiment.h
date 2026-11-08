@@ -28,7 +28,8 @@ Result optimize(
     const ReferenceSurface& reference,
     double planePenalty,
     const std::function<double(uint32_t, uint32_t)>& edgeCost = {},
-    Constraints constraints = {}
+    Constraints constraints = {},
+    const std::vector<uint8_t>* protectedVertices = nullptr
 );
 double sampledReferenceError(
     const Triangulation3D::MeshTriangulationResult& source,

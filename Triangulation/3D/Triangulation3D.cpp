@@ -6,6 +6,8 @@
 #include "Triangulation/2D/ProjectedPatchTriangulation.h"
 #include "Triangulation/GeometryMath.h"
 #include "Triangulation/MeshValidation.h"
+#include "Triangulation/3D/ReferenceSurface.h"
+#include "Triangulation/SurfaceGeometryMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -225,7 +227,8 @@ PatchStats computePatchStats(
     }
 
     const float diagonal = computeBoundsDiagonal(mesh, stats.vertexIndices);
-    stats.planeTolerance = std::max(options.minPlaneDeviation, options.maxRelativePlaneDeviation * diagonal);
+    stats.planeTolerance = std::min(options.maxAbsolutePlaneDeviation,
+        std::max(options.minPlaneDeviation, options.maxRelativePlaneDeviation * diagonal));
     stats.valid = stats.maxPlaneDistance <= stats.planeTolerance && stats.maxNormalDeviationDegrees <= options.maxNormalDeviationDegrees;
     return stats;
 }
@@ -381,7 +384,12 @@ Patch makePatch(
         if (count.first > 2 || (count.first == 2 && count.second != 0))
             manifold = false;
     patch.isDiskLike = stats.valid && manifold && orderBoundaryLoop(patch.boundaryEdges, patch.boundaryLoop);
-    patch.message = patch.isDiskLike ? "Patch is disk-like." : "Patch boundary is not a single disk-like loop.";
+    patch.message = patch.isDiskLike ? "Patch is disk-like." :
+        !stats.valid ? (stats.maxPlaneDistance > stats.planeTolerance ? "Patch plane-deviation limit exceeded." :
+            stats.maxNormalDeviationDegrees > options.maxNormalDeviationDegrees ? "Patch normal-variation limit exceeded." :
+            "Patch projection frame or source-face orientation is invalid.") :
+        !manifold ? "Patch incidence or Euler characteristic is not a disk." :
+        "Patch boundary is not a single loop.";
     return patch;
 }
 
@@ -435,6 +443,48 @@ ProjectedPatch projectPatch(const Mesh& mesh, const Patch& patch)
     return projectedPatch;
 }
 
+// Identical fixed-source budget for patch growth, flip admission and reporting.
+double surfaceErrorLimit(const Mesh& mesh)
+{
+    if (mesh.vertices.empty()) return 0;
+    auto lo = mesh.vertices.front(), hi = lo;
+    for (auto p : mesh.vertices) { lo = Falcor::math::min(lo, p); hi = Falcor::math::max(hi, p); }
+    return Falcor::math::length(hi - lo) * 0.001;
+}
+
+Triangulation::FlipAdmission surfaceFlipAdmission(
+    const Mesh& mesh, const Patch& patch, const ProjectedPatch& projected,
+    const MeshTriangulationResult& source, const TriangulationOptions& options)
+{
+    MeshTriangulationResult canonicalPatch;
+    canonicalPatch.vertices = projected.originalVertices;
+    for (auto t : patch.sourceTriangleIndices)
+        for (uint32_t j = 0; j < 3; ++j)
+            canonicalPatch.indices.push_back(projected.globalToLocal.at(source.indices[3 * size_t(t) + j]));
+    const SurfaceFlipExperiment::ReferenceSurface reference(canonicalPatch);
+    const double epsilon = surfaceErrorLimit(mesh);
+    Triangulation::FlipAdmission admission;
+    admission.surfacePositions = &projected.originalVertices;
+    if (options.admitsDiagonal)
+        admission.admitsDiagonal = [&projected, admits = options.admitsDiagonal](uint32_t a, uint32_t b)
+        { return admits(projected.localToGlobal[a], projected.localToGlobal[b]); };
+    admission.acceptsSurface = [reference, epsilon, &positions = projected.originalVertices](uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+    {
+        using namespace SurfaceGeometryMath;
+        for (auto point : {scale(add(positions[c], positions[d]), 0.5),
+                 scale(add(add(positions[c], positions[d]), positions[a]), 1.0 / 3),
+                 scale(add(add(positions[c], positions[d]), positions[b]), 1.0 / 3)})
+            if (reference.distance(point) > epsilon) return false;
+        return true;
+    };
+    return admission;
+}
+
+bool admitsPatch(const Mesh& mesh, const Patch& patch)
+{
+    return patch.isDiskLike && ProjectedTriangulation::hasValidBoundary(projectPatch(mesh, patch));
+}
+
 } // namespace
 
 const char* getMethodName(Method method)
@@ -484,7 +534,19 @@ static std::vector<Patch> growFacePatches(const Mesh& mesh, const PatchGrowthOpt
         std::set<uint32_t> patchSourceFaces = {sourceFaces[seedFace]};
         assigned[seedFace] = true;
 
-        const bool seedValid = computePatchStats(mesh, patchFaces, options, faces).valid;
+        const bool protectedSeed = options.protectedVertices &&
+            (!faces[seedFace].valid || std::any_of(mesh.faces[seedFace].begin(), mesh.faces[seedFace].end(),
+                [&](uint32_t v) { return (*options.protectedVertices)[v] != 0; }));
+        if (protectedSeed)
+        {
+            Patch retained;
+            retained.faceIndices = {seedFace};
+            retained.vertexIndices = mesh.faces[seedFace];
+            retained.preserveSource = true;
+            patches.push_back(std::move(retained));
+            continue;
+        }
+        const bool seedValid = admitsPatch(mesh, makePatch(mesh, patchFaces, options, faces));
         std::queue<uint32_t> candidates;
         std::vector<bool> queued(mesh.faces.size(), false);
         for (uint32_t neighbor : adjacency[seedFace])
@@ -512,10 +574,12 @@ static std::vector<Patch> growFacePatches(const Mesh& mesh, const PatchGrowthOpt
             }
 
             patchFaces.push_back(candidateFace);
-            const PatchStats stats = computePatchStats(mesh, patchFaces, options, faces);
+            const bool valid = admitsPatch(mesh, makePatch(mesh, patchFaces, options, faces));
             patchFaces.pop_back();
 
-            if (!stats.valid)
+            if (!valid || (options.protectedVertices &&
+                std::any_of(mesh.faces[candidateFace].begin(), mesh.faces[candidateFace].end(),
+                    [&](uint32_t v) { return (*options.protectedVertices)[v] != 0; })))
             {
                 continue;
             }
@@ -545,6 +609,10 @@ std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& optio
     // Split seeds that cannot be projected within the requested plane tolerance
     // into their already defined source triangles. They can then grow normally,
     // without bypassing seed eligibility or dropping a curved source face.
+    const auto source = useSourceMeshTriangulation(mesh, options.protectedVertices != nullptr);
+    if (!source.success) return {};
+    auto boundedOptions = options;
+    boundedOptions.maxAbsolutePlaneDeviation = std::min(options.maxAbsolutePlaneDeviation, float(0.49 * surfaceErrorLimit(mesh)));
     Mesh prepared;
     prepared.vertices = mesh.vertices;
     std::vector<std::vector<uint32_t>> sourceTriangles;
@@ -561,7 +629,8 @@ std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& optio
     {
         const auto& face = mesh.faces[f];
         const uint32_t triangleCount = uint32_t(face.size() - 2);
-        if (computePatchStats(mesh, {f}, options, originalGeometry).valid)
+        if ((options.protectedVertices && !originalGeometry[f].valid) ||
+            admitsPatch(mesh, makePatch(mesh, {f}, boundedOptions, originalGeometry)))
         {
             prepared.faces.push_back(face);
             originalFaces.push_back(f);
@@ -571,26 +640,17 @@ std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& optio
         }
         else
         {
-            Mesh local;
-            local.faces.emplace_back();
-            for (auto i : face)
-            {
-                local.faces.back().push_back(uint32_t(local.vertices.size()));
-                local.vertices.push_back(mesh.vertices[i]);
-            }
-            auto source = useSourceMeshTriangulation(local);
-            if (!source.success)
-                return {};
             for (uint32_t t = 0; t < triangleCount; ++t)
             {
-                prepared.faces.push_back({face[source.indices[3 * t]], face[source.indices[3 * t + 1]], face[source.indices[3 * t + 2]]});
+                const size_t i = 3 * size_t(firstTriangle + t);
+                prepared.faces.push_back({source.indices[i], source.indices[i + 1], source.indices[i + 2]});
                 originalFaces.push_back(f);
                 sourceTriangles.push_back({firstTriangle + t});
             }
         }
         firstTriangle += triangleCount;
     }
-    auto patches = growFacePatches(prepared, options, originalFaces);
+    auto patches = growFacePatches(prepared, boundedOptions, originalFaces);
     for (auto& patch : patches)
     {
         std::set<uint32_t> faces;
@@ -604,13 +664,14 @@ std::vector<Patch> growPatches(const Mesh& mesh, const PatchGrowthOptions& optio
     return patches;
 }
 
-PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, const TriangulationOptions& options)
+PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, const TriangulationOptions& options,
+    const MeshTriangulationResult* source)
 {
     PatchTriangulationResult result;
 
     if (!patch.isDiskLike)
     {
-        result.message = "Patch triangulation skipped because the boundary is not a single disk-like loop.";
+        result.message = patch.message;
         return result;
     }
     if (patch.vertexIndices.size() < 3)
@@ -621,10 +682,16 @@ PatchTriangulationResult triangulatePatch(const Mesh& mesh, const Patch& patch, 
 
     const ProjectedPatch projectedPatch = projectPatch(mesh, patch);
 
-    return ProjectedTriangulation::triangulate(projectedPatch, patch.frame, options);
+    if (options.method != Method::ConstrainedDelaunayFlipped || patch.sourceTriangleIndices.size() < 2)
+        return ProjectedTriangulation::triangulate(projectedPatch, patch.frame, options);
+    MeshTriangulationResult ownedSource;
+    if (!source) { ownedSource = useSourceMeshTriangulation(mesh); source = &ownedSource; }
+    if (!source->success) { result.message = "Canonical patch source is unavailable."; return result; }
+    const auto admission = surfaceFlipAdmission(mesh, patch, projectedPatch, *source, options);
+    return ProjectedTriangulation::triangulate(projectedPatch, patch.frame, options, &admission);
 }
 
-MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh)
+MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh, bool preserveDegenerateTriangles)
 {
     MeshTriangulationResult result;
     result.vertices = mesh.vertices;
@@ -644,7 +711,7 @@ MeshTriangulationResult useSourceMeshTriangulation(const Mesh& mesh)
             const float area = 0.5f * length3(cross3(
                 subtract3(mesh.vertices[face[1]], mesh.vertices[face[0]]),
                 subtract3(mesh.vertices[face[2]], mesh.vertices[face[0]])));
-            if (!std::isfinite(area) || area < 1e-12f)
+            if (!std::isfinite(area) || (!preserveDegenerateTriangles && area < 1e-12f))
             {
                 result.messages.push_back("Degenerate source face " + std::to_string(faceIndex));
                 result.indices.clear();
@@ -729,6 +796,16 @@ MeshTriangulationResult triangulatePreparedMesh(
     MeshTriangulationResult result;
     result.vertices = mesh.vertices;
     result.patches = patches;
+    const bool cdt = options.method == Method::ConstrainedDelaunay || options.method == Method::ConstrainedDelaunayFlipped;
+    std::map<EdgeKey, int> edgeUses;
+    auto updateEdges = [&](const std::vector<uint32_t>& indices, size_t i, int delta)
+    {
+        if (cdt)
+            for (size_t j = 0; j < 3; ++j)
+                edgeUses[makeEdgeKey(indices[i + j], indices[i + (j + 1) % 3])] += delta;
+    };
+    if (cdt)
+        for (size_t i = 0; i < source.indices.size(); i += 3) updateEdges(source.indices, i, 1);
     std::vector<bool> covered(source.indices.size() / 3, false);
     auto rollback = [&](const std::string& message)
     {
@@ -739,17 +816,37 @@ MeshTriangulationResult triangulatePreparedMesh(
         retained.status = ResultStatus::SourceFallback;
         return retained;
     };
-    for (const auto& patch : patches)
+    for (size_t patchIndex = 0; patchIndex < patches.size(); ++patchIndex)
     {
+        const auto& patch = patches[patchIndex];
         for (auto face : patch.sourceTriangleIndices)
         {
             if (face >= covered.size() || covered[face])
                 return rollback("Patch coverage is invalid.");
             covered[face] = true;
+            updateEdges(source.indices, 3 * size_t(face), -1);
         }
-        auto output = triangulatePatch(mesh, patch, options);
+        auto patchOptions = options;
+        if (cdt)
+            patchOptions.admitsDiagonal = [&](uint32_t a, uint32_t b)
+            {
+                const auto found = edgeUses.find(makeEdgeKey(a, b));
+                return (found == edgeUses.end() || found->second == 0) && (!options.admitsDiagonal || options.admitsDiagonal(a, b));
+            };
+        auto output = patch.preserveSource ? PatchTriangulationResult{} : triangulatePatch(mesh, patch, patchOptions, &source);
         if (!output.success)
-            return rollback(output.message);
+        {
+            if (!options.preserveSourceDefects) return rollback("Patch " + std::to_string(patchIndex) + ": " + output.message);
+            // Leave unsupported/protected regions exactly as supplied; optimize
+            // the other patches without repairing or deleting input triangles.
+            for (auto t : patch.sourceTriangleIndices)
+            {
+                result.indices.insert(result.indices.end(), source.indices.begin() + 3 * t, source.indices.begin() + 3 * t + 3);
+                updateEdges(source.indices, 3 * size_t(t), 1);
+            }
+            if (!patch.preserveSource) ++result.failedPatchCount;
+            continue;
+        }
         if (output.vertices.size() != output.sourceVertexIndices.size())
             return rollback("Invalid vertex mapping.");
         std::vector<uint32_t> mapping(output.vertices.size(), kInvalidIndex);
@@ -768,11 +865,26 @@ MeshTriangulationResult triangulatePreparedMesh(
                 return rollback("Invalid local triangle index.");
             result.indices.push_back(mapping[i]);
         }
+        for (size_t i = result.indices.size() - output.indices.size(); i < result.indices.size(); i += 3)
+            updateEdges(result.indices, i, 1);
     }
     if (std::find(covered.begin(), covered.end(), false) != covered.end())
         return rollback("Source faces were not covered.");
-    if (result.indices.size() != source.indices.size() || !MeshValidation::audit(result, source).topologyOK())
-        return rollback("Assembled surface failed coverage or topology checks.");
+    // CDT was admitted before optimization; guarded flips preserve its topology.
+    // Final audits belong to diagnostics, not an assembled-mesh Source rollback.
+    if (!cdt)
+    {
+        const auto assembledAudit = MeshValidation::audit(result, source);
+        const bool topologyValid = options.preserveSourceDefects ? MeshValidation::preservesSourceDefects(
+            result, source, assembledAudit, MeshValidation::audit(source, source), MeshValidation::protectedSourceVertices(source)) :
+            assembledAudit.topologyOK();
+        if (result.indices.size() != source.indices.size() || !topologyValid)
+            return rollback("Assembled surface rejected: triangles=" + std::to_string(result.indices.size() / 3) +
+                ", duplicates=" + std::to_string(assembledAudit.duplicates) + ", degenerate=" + std::to_string(assembledAudit.degenerate) +
+                ", nonmanifold=" + std::to_string(assembledAudit.nonmanifold) + ", winding=" + std::to_string(assembledAudit.winding) +
+                ", missing boundary=" + std::to_string(assembledAudit.missingBoundary) +
+                ", unexpected boundary=" + std::to_string(assembledAudit.unexpectedBoundary));
+    }
     result.success = !result.indices.empty();
     result.status = result.success ? ResultStatus::Complete : ResultStatus::Failed;
     return result;

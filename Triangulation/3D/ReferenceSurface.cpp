@@ -11,6 +11,18 @@ using namespace SurfaceGeometryMath;
 double pointTriangleDistance2(V p, V a, V b, V c)
 {
     V ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+    if (dot(cross(ab, ac), cross(ab, ac)) <= 1e-30)
+    {
+        auto segment = [&](V x, V y)
+        {
+            const V e = sub(y, x);
+            const double l2 = dot(e, e);
+            const double t = l2 > 0 ? std::clamp(dot(sub(p, x), e) / l2, 0.0, 1.0) : 0.0;
+            const V delta = sub(p, add(x, scale(e, t)));
+            return dot(delta, delta);
+        };
+        return std::min({segment(a, b), segment(b, c), segment(c, a)});
+    }
     double d1 = dot(ab, ap), d2 = dot(ac, ap);
     if (d1 <= 0 && d2 <= 0)
         return dot(ap, ap);

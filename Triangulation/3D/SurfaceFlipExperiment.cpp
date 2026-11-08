@@ -25,6 +25,7 @@ struct Adjacency
     int t[2] = {-1, -1};
     uint32_t opposite[2] = {0, 0};
     uint32_t version = 0;
+    uint32_t count = 0;
 };
 struct Candidate
 {
@@ -46,7 +47,8 @@ Result optimize(
     const ReferenceSurface& reference,
     double planePenalty,
     const std::function<double(uint32_t, uint32_t)>& edgeCost,
-    Constraints constraints
+    Constraints constraints,
+    const std::vector<uint8_t>* protectedVertices
 )
 {
     Result result;
@@ -72,14 +74,17 @@ Result optimize(
             ++e.version;
             if (insert)
             {
+                if (++e.count > 2) continue; // Never overwrite a nonmanifold edge's stored pair.
                 int s = e.t[0] < 0 ? 0 : 1;
                 e.t[s] = t;
                 e.opposite[s] = indices[3 * t + (j + 2) % 3];
             }
             else
+            {
+                --e.count;
                 for (int s = 0; s < 2; ++s)
-                    if (e.t[s] == t)
-                        e.t[s] = -1;
+                    if (e.t[s] == t) e.t[s] = -1;
+            }
         }
     };
     for (int t = 0; t < int(indices.size() / 3); ++t)
@@ -89,7 +94,7 @@ Result optimize(
         // First reject topology and local geometry failures. These checks are
         // cheap enough to run while inserting and refreshing heap candidates.
         const auto& e = adjacency.at(k);
-        if (e.t[0] < 0 || e.t[1] < 0)
+        if (e.count != 2 || e.t[0] < 0 || e.t[1] < 0)
             return false;
         f.a = uint32_t(k >> 32);
         f.b = uint32_t(k);
@@ -97,6 +102,8 @@ Result optimize(
         f.d = e.opposite[1];
         f.t0 = e.t[0];
         f.t1 = e.t[1];
+        if (protectedVertices && ((*protectedVertices)[f.a] || (*protectedVertices)[f.b] ||
+                                  (*protectedVertices)[f.c] || (*protectedVertices)[f.d])) return false;
         if (f.a == f.c || f.a == f.d || f.b == f.c || f.b == f.d || f.c == f.d)
             return false;
         auto existing = adjacency.find(key(f.c, f.d));
