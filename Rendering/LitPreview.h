@@ -23,7 +23,12 @@ struct LitPreviewSettings
 class LitPreview
 {
 public:
-    explicit LitPreview(Falcor::ref<Falcor::Texture> counters = nullptr) : mpCounters(std::move(counters)) {}
+    // quadWork forces cross-lane (derivative) work in the timed shader so helper lanes stay live:
+    // 0 = original GraphEx lighting (no derivatives), 1 = flat normals from ddx/ddy(worldPos),
+    // 2 = implicit-LOD trilinear sample of a deterministic random 2048^2 RGBA8 mip-mapped texture,
+    // 3 = sixteen dependent implicit-LOD samples of that texture.
+    explicit LitPreview(Falcor::ref<Falcor::Texture> counters = nullptr, uint32_t quadWork = 0)
+        : mpCounters(std::move(counters)), mQuadWork(quadWork) {}
     void draw(
         Falcor::RenderContext* context,
         const Falcor::ref<Falcor::Fbo>& target,
@@ -46,4 +51,5 @@ private:
     Falcor::ref<Falcor::Vao> mpVao;
     Falcor::ref<Falcor::Buffer> mpPositions;
     Falcor::ref<Falcor::Texture> mpCounters;
+    uint32_t mQuadWork = 0;
 };

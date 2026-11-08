@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <stdexcept>
@@ -126,7 +128,8 @@ class Builder
                 const uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances))));
                 const uint32_t rows = (o.instances + cols - 1) / cols;
                 const float radius = computeMaxDistanceFromOrigin(source.vertices);
-                const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, radius * 2.5f, radius);
+                const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, radius * 2.5f, radius, nullptr,
+                                                   o.cameraDistanceScale);
                 std::vector<std::vector<float2>> screens;
                 p.objectiveInstances = name == "HeapScreen" || name == "HeapQuad" ? 1 : o.instances;
                 const uint32_t begin = view < 0 ? 0 : uint32_t(p.optimizationView);
@@ -338,7 +341,8 @@ public:
         }
         uint32_t cols = uint32_t(std::ceil(std::sqrt(double(o.instances)))), rows = (o.instances + cols - 1) / cols;
         float spacing = geometryRadius * 2.5f;
-        const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, spacing, geometryRadius, &cameraPosition);
+        const auto vp = makeVolumeViewProj(o.width, o.height, cols, rows, 1, false, spacing, geometryRadius, &cameraPosition,
+                                           o.cameraDistanceScale);
         const Params prime{
             vp,
             modelForView(0),
@@ -371,6 +375,26 @@ public:
                             p.rasterMetrics.emplace(view, RasterMetrics::measure(p.mesh, model, vp, o.width, o.height, o.instances, cols, spacing));
                         }
                     }
+        if (!o.exportMeshes.empty())
+        {
+            // Write each prepared triangulation (same vertex list, final index order) for offline inspection/capture.
+            std::filesystem::create_directories(o.exportMeshes);
+            auto stem = std::filesystem::path(shape.rfind("obj:", 0) == 0 ? shape.substr(4) : shape).stem().string();
+            for (const auto& p : prepared)
+            {
+                if (p.mesh.indices.empty()) continue;
+                const auto path = std::filesystem::path(o.exportMeshes) /
+                    (stem + "_" + p.name + (p.view >= 0 ? "_v" + std::to_string(p.view) : "") + ".obj");
+                std::ofstream obj(path);
+                if (!obj) throw std::runtime_error("Cannot write exported mesh: " + path.string());
+                obj << "# " << shape << " / " << p.name << ", valid=" << p.metrics.valid << ", flips=" << p.metrics.flips << "\n";
+                obj.precision(9);
+                for (const auto& v : p.mesh.vertices) obj << "v " << v.x << ' ' << v.y << ' ' << v.z << '\n';
+                for (size_t i = 0; i + 2 < p.mesh.indices.size(); i += 3)
+                    obj << "f " << p.mesh.indices[i] + 1 << ' ' << p.mesh.indices[i + 1] + 1 << ' ' << p.mesh.indices[i + 2] + 1 << '\n';
+                std::cout << "Exported " << path.string() << std::endl;
+            }
+        }
         std::cout << "CPU preparation and projected metrics complete" << std::endl;
         return {std::move(prepared), geometryParams, std::move(sourceIndices), cameraPosition, geometryRadius};
     }

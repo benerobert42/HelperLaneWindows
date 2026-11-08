@@ -49,9 +49,34 @@ void LitPreview::draw(
         desc.setShaderModel(ShaderModel::SM6_6);
         mpProgram = Program::create(device, desc);
         mpProgram->addDefine("DIAGNOSTICS", mpCounters ? "1" : "0");
+        mpProgram->addDefine("QUAD_WORK", std::to_string(mQuadWork));
         mpVars = ProgramVars::create(device, mpProgram.get());
         if (mpCounters)
             mpVars->setTexture("gCounters", mpCounters);
+        if (mQuadWork >= 2)
+        {
+            // One shared deterministic noise texture (fixed LCG seed); Falcor generates the full mip chain.
+            static ref<Texture> sTexture;
+            static ref<Sampler> sSampler;
+            if (!sTexture)
+            {
+                constexpr uint32_t kSize = 2048;
+                std::vector<uint32_t> texels(size_t(kSize) * kSize);
+                uint32_t state = 20261108u;
+                for (auto& texel : texels)
+                {
+                    state = state * 1664525u + 1013904223u;
+                    texel = state | 0xFF000000u;
+                }
+                sTexture = device->createTexture2D(kSize, kSize, ResourceFormat::RGBA8Unorm, 1, Resource::kMaxPossible, texels.data());
+                Sampler::Desc sampler;
+                sampler.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Linear, TextureFilteringMode::Linear)
+                    .setAddressingMode(TextureAddressingMode::Wrap, TextureAddressingMode::Wrap, TextureAddressingMode::Wrap);
+                sSampler = device->createSampler(sampler);
+            }
+            mpVars->setTexture("gNoise", sTexture);
+            mpVars->setSampler("gNoiseSampler", sSampler);
+        }
         mpState = GraphicsState::create(device);
         mpState->setProgram(mpProgram);
         DepthStencilState::Desc depth;

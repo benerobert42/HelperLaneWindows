@@ -158,7 +158,8 @@ for (shader, msaa, ordering, depth), ps in regimes.items():
                                 Observations=len(ps), HeldOutGeometries=len(geometries),
                                 CV_RMSE_LogRatio=math.sqrt(st.mean(errors)),
                                 CV_ImprovementOverNoChange=1 - sum(errors) / naive if naive else 0))
-save('predictors.csv', predictions)
+if predictions:  # Held-out prediction needs >=3 geometries in a regime.
+    save('predictors.csv', predictions)
 
 lines = [f'Connectivity mechanism study: {case_count} cases, {raw_count} raw samples.',
          'RTX 4050 Laptop, D3D12 Release; randomized blocks; (instances, warmup, samples, queue depth): ' + str(sorted(protocols)),

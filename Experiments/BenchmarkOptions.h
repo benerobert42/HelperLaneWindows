@@ -24,6 +24,9 @@ struct Options
     uint32_t axisSteps = 0;
     std::vector<uint32_t> axisAngles;
     std::string captureMethod = "Source";
+    float cameraDistanceScale = 1.f;
+    std::string exportMeshes; // Directory for per-method OBJ exports of prepared triangulations; empty = off.
+    uint32_t litQuadWork = 0; // 0 none, 1 ddx/ddy normals, 2 mip-mapped 2K texture (see LitPreview).
 };
 Options parse(int argc, char** argv);
 std::string describeRun(const Options& options);

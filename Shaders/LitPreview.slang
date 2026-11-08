@@ -3,11 +3,21 @@
 #ifndef DIAGNOSTICS
 #define DIAGNOSTICS 0
 #endif
+// QUAD_WORK: 0 none; 1 flat normal from ddx/ddy(worldPos); 2 implicit-LOD sample of a mip-mapped 2K noise texture;
+// 3 sixteen dependent implicit-LOD samples of the same texture.
+// Modes 1/2 need quad derivatives, so helper lanes must execute up to that point in the timed shader.
+#ifndef QUAD_WORK
+#define QUAD_WORK 0
+#endif
 #if DIAGNOSTICS
 RWTexture2D<uint> gCounters;
 #endif
+#if QUAD_WORK >= 2
+Texture2D<float4> gNoise;
+SamplerState gNoiseSampler;
+#endif
 struct VSIn { float3 pos : POSITION; float3 normal : NORMAL; };
-struct V2P { float4 pos : SV_Position; float3 worldPos : POSITION; float3 normal : NORMAL; };
+struct V2P { float4 pos : SV_Position; float3 worldPos : POSITION; float3 normal : NORMAL; float3 objectPos : TEXCOORD0; };
 cbuffer Camera { float4x4 viewProj; };
 cbuffer VolumeModel { float4x4 volumeModel; };
 cbuffer VolumeGrid
@@ -36,6 +46,7 @@ V2P vsMain(VSIn v, uint instanceId : SV_InstanceID)
     o.worldPos = mul(volumeModel, float4(v.pos, 1.0)).xyz + offset;
     o.pos = mul(viewProj, float4(o.worldPos, 1.0));
     o.normal = mul(normalTransform, float4(v.normal, 0.0)).xyz;
+    o.objectPos = v.pos;
     return o;
 }
 
@@ -55,15 +66,41 @@ float4 psMain(V2P input) : SV_Target
         InterlockedAdd(gCounters[uint2(1, 0)], 4 - helpers);
     }
 #endif
+#if QUAD_WORK == 1
+    // Faceted normal from screen-space position derivatives, oriented toward the viewer.
+    float3 normal = normalize(cross(ddx(input.worldPos), ddy(input.worldPos)));
+    if (dot(normal, cameraPosition - input.worldPos) < 0.0) normal = -normal;
+#else
     float3 normal = normalize(input.normal);
+#endif
+    float3 albedo = float3(1.0);
+#if QUAD_WORK == 2
+    // Object-space planar mapping; the implicit LOD comes from the quad's UV derivatives.
+    float2 uv = input.objectPos.xy * 3.1 + input.objectPos.z * 1.7;
+    albedo = 0.5 + gNoise.Sample(gNoiseSampler, uv).rgb;
+#elif QUAD_WORK == 3
+    // 16 dependent implicit-LOD samples: each UV depends on the previous texel, so every helper
+    // lane must execute the whole chain to supply derivatives (same pattern as PerfShader MATERIAL_STRESS).
+    float2 uv = input.objectPos.xy * 3.1 + input.objectPos.z * 1.7;
+    float4 texel = gNoise.Sample(gNoiseSampler, uv);
+    float4 sum = texel;
+    [unroll] for (uint i = 1; i < 16; ++i)
+    {
+        float fi = float(i);
+        uv += float2(sin(texel.r + fi * 2.17), cos(texel.g + fi * 1.71)) * 0.027;
+        texel = gNoise.Sample(gNoiseSampler, uv + float2(fi * 0.019, fi * 0.037));
+        sum += texel;
+    }
+    albedo = 0.5 + sum.rgb / 16.0;
+#endif
     float3 toLight = lightType == 0u ? lightPosition - input.worldPos : lightDirection;
     float lightDistance = lightType == 0u ? length(toLight) : 0.0;
     toLight = normalize(toLight);
     float attenuation = 1.0 / (attenuationCoefficients.x + attenuationCoefficients.y * lightDistance
         + attenuationCoefficients.z * lightDistance * lightDistance);
-    float3 ambient = lightAmbient * materialAmbient;
+    float3 ambient = lightAmbient * materialAmbient * albedo;
     float diffuseFactor = max(dot(toLight, normal), 0.0) * attenuation;
-    float3 diffuse = diffuseFactor * lightDiffuse * materialDiffuse;
+    float3 diffuse = diffuseFactor * lightDiffuse * materialDiffuse * albedo;
     float3 viewDir = normalize(cameraPosition - input.worldPos);
     float3 reflectDir = reflect(-toLight, normal);
     float specularFactor = pow(max(dot(viewDir, reflectDir), 0.0), shininess) * attenuation;

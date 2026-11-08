@@ -216,7 +216,8 @@ float4x4 makeVolumeViewProj(
     bool use3DGrid,
     float gridSpacing,
     float boundsRadius,
-    float3* cameraPosition
+    float3* cameraPosition,
+    float distanceScale
 )
 {
     width = std::max(width, 1u);
@@ -231,7 +232,9 @@ float4x4 makeVolumeViewProj(
     const float tanHalfFovX = tanHalfFovY * aspectRatio;
     const float fitDistanceY = halfY / std::max(tanHalfFovY, 1e-3f);
     const float fitDistanceX = halfX / std::max(tanHalfFovX, 1e-3f);
-    const float cameraDistance = std::max(2.0f, std::max(fitDistanceX, fitDistanceY) + halfZ + 0.5f);
+    // distanceScale > 1 pulls the camera back along the fitted axis, shrinking the
+    // on-screen footprint (~1/scale linearly) without clipping; 1 keeps the fit.
+    const float cameraDistance = std::max(2.0f, std::max(fitDistanceX, fitDistanceY) + halfZ + 0.5f) * std::max(distanceScale, 1.0f);
     if (cameraPosition)
         *cameraPosition = float3(0.f, 0.f, cameraDistance);
     const float farPlane = std::max(10.0f, cameraDistance + halfZ + 2.0f);

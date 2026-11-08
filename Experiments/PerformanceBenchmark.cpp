@@ -175,7 +175,7 @@ class PerformanceApp : public SampleApp
             c.objectiveInstances = p.objectiveInstances;
             c.connectivitySeed = o.paperPlanar ? "Earcut" : p.name == "HeapQuadWarm" || p.name == "HeapQuadWarmLag" ? "Heap3D" : "Source";
             c.msaa = msaa;
-            c.shader = o.paperPlanar ? "PaperPlanarTexture2K" : o.lit ? "LitPreview" : stress ? "Material16" : "Texture1";
+            c.shader = o.paperPlanar ? "PaperPlanarTexture2K" : o.lit ? (o.litQuadWork == 1 ? "LitDdxNormal" : o.litQuadWork == 2 ? "LitTex2K" : o.litQuadWork == 3 ? "LitTex2K16" : "LitPreview") : stress ? "Material16" : "Texture1";
             if (o.explicitLod)
                 c.shader += "ExplicitLOD";
             c.instances = params.instanceCount;
@@ -378,8 +378,8 @@ private:
             p.vao = upload(p.mesh);
             if (o.lit && p.vao)
             {
-                p.lit[0] = std::make_unique<LitPreview>();
-                p.lit[1] = std::make_unique<LitPreview>(counters);
+                p.lit[0] = std::make_unique<LitPreview>(nullptr, o.litQuadWork);
+                p.lit[1] = std::make_unique<LitPreview>(counters, o.litQuadWork);
             }
             p.metrics.setupMs += std::chrono::duration<double, std::milli>(Clock::now() - start).count();
         }

@@ -97,6 +97,25 @@ Options parse(int argc, char** argv)
             if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !(o.bezierDeviation > 0) || !std::isfinite(o.bezierDeviation))
                 throw std::runtime_error("Bezier deviation must be a positive finite number.");
         }
+        else if (a == "--camera-distance-scale")
+        {
+            const auto text = value();
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), o.cameraDistanceScale);
+            if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || !std::isfinite(o.cameraDistanceScale) ||
+                o.cameraDistanceScale < 1.f || o.cameraDistanceScale > 64.f)
+                throw std::runtime_error("Camera distance scale must be a finite number in [1, 64].");
+        }
+        else if (a == "--export-meshes")
+            o.exportMeshes = value();
+        else if (a == "--lit-quad-work")
+        {
+            const auto mode = value();
+            if (mode == "none") o.litQuadWork = 0;
+            else if (mode == "ddx") o.litQuadWork = 1;
+            else if (mode == "tex2k") o.litQuadWork = 2;
+            else if (mode == "tex2k16") o.litQuadWork = 3;
+            else throw std::runtime_error("Lit quad work must be none, ddx, tex2k or tex2k16.");
+        }
         else if (a == "--capture-method")
             o.captureMethod = value();
         else if (a == "--msaa")
@@ -166,10 +185,14 @@ Options parse(int argc, char** argv)
         o.msaa.empty())
         throw std::runtime_error("Performance options must be nonzero/nonempty.");
     for (auto s : o.msaa)
-        if (s != 1 && s != 4)
-            throw std::runtime_error("This study supports MSAA 1 or 4.");
+        if (o.paperPlanar ? (s != 1 && s != 4) : (s != 1 && s != 2 && s != 4 && s != 8))
+            throw std::runtime_error(o.paperPlanar ? "Paper planar mode supports MSAA 1 or 4." : "This study supports MSAA 1, 2, 4 or 8.");
+    if (o.paperPlanar && o.cameraDistanceScale != 1.f)
+        throw std::runtime_error("Paper planar mode fixes its own projection; no camera distance scale.");
     if (!o.queueDepth || o.queueDepth > 32)
         throw std::runtime_error("Queue depth must be 1..32.");
+    if (o.litQuadWork && !o.lit)
+        throw std::runtime_error("--lit-quad-work applies only to --lit.");
     if (o.lit && !o.depth)
         throw std::runtime_error("Lit comparisons require depth.");
     if (o.ordering != "native" && o.ordering != "cache" && o.ordering != "cache-overdraw")
@@ -246,7 +269,14 @@ std::string describeRun(const Options& o)
     "\nPSInvocations are API-reported invocations, not a guarantee of useful pixels or helper-lane instruction work."
     "\nRaster metrics: pre-depth, unclipped projected triangles; area/shape include occluded faces."
     "\nCache simulation: meshoptimizer cache=16, warp=32, primitive group=128; not hardware counters."
-    "\nOrdering: " + o.ordering + "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod) +
+    "\nOrdering: " + o.ordering +
+    "\nLit quad work: " + std::string(o.litQuadWork == 1 ? "ddx (flat normals from ddx/ddy of world position)" :
+                                       o.litQuadWork == 2 ? "tex2k (implicit-LOD trilinear sample, random 2048x2048 RGBA8, full mips, wrap)" :
+                                       o.litQuadWork == 3 ? "tex2k16 (16 dependent implicit-LOD trilinear samples of the tex2k texture)" :
+                                                            "none (timed lit shader has no derivatives)") +
+    "\nCamera distance scale: " + std::to_string(o.cameraDistanceScale) +
+    " (multiplies the bounds-fitted camera distance; 1 = fitted, larger shrinks the projected footprint)"
+    "\nExplicit texture LOD 0: " + std::to_string(o.explicitLod) +
     "\nSeparate-axis rotation steps: " + std::to_string(o.axisSteps) +
     "; model = Rx * Ry * Rz; randomized view order for axis sweeps."
     "\nExplicit axis angles: " + (explicitAngles.empty() ? "uniform full-circle spacing" : explicitAngles) +
